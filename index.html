@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HouseLoop — Gestión de Propiedades</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #FAFAFA;
+      color: #1C150F;
+    }
+    h1 { color: #F36162; }
+    h2 { color: #1C150F; margin-top: 40px; }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    input, select, textarea {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #E0E0E0;
+      border-radius: 8px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    button {
+      background: #F36162;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      width: 100%;
+      margin-top: 8px;
+    }
+    button:hover { background: #F03E3F; }
+  </style>
+</head>
+<body>
+
+  <h1>🏠 HouseLoop — Gestión de Propiedades</h1>
+
+  <!-- ── CREAR PROPIEDAD ── -->
+  <h2>Crear Propiedad</h2>
+  <form action="/propiedades" method="post">
+    <div class="form-group">
+      <label>Título</label>
+      <input type="text" name="titulo" placeholder="Ej: Apartamento en el centro" required>
+    </div>
+    <div class="form-group">
+      <label>Precio</label>
+      <input type="number" name="precio" placeholder="Ej: 350000000" required>
+    </div>
+    <div class="form-group">
+      <label>Tipo</label>
+      <select name="tipo">
+        <option value="venta">Venta</option>
+        <option value="arriendo">Arriendo</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Descripción</label>
+      <textarea name="descripcion" rows="3" placeholder="Describe la propiedad..."></textarea>
+    </div>
+    <button type="submit">Guardar Propiedad</button>
+  </form>
+
+</body>
+</html>

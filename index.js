@@ -5,6 +5,7 @@
 
 const express = require('express');
 const app = express();
+const path = require('path');
 
 // Puerto del servidor
 const PORT = 3000;
@@ -15,7 +16,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Ruta de prueba
 app.get('/', (req, res) => {
-  res.send('🏠 HouseLoop Backend corriendo correctamente');
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // Iniciar servidor
