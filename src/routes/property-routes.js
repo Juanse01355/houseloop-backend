@@ -5,88 +5,23 @@
 
 const express = require('express');
 const router = express.Router();
-const connection = require('../db/connection');
+const {
+  obtenerPropiedades,
+  guardarPropiedad,
+  actualizarPropiedad,
+  eliminarPropiedad
+} = require('../controllers/property-controller');
 
 // ── GET /propiedades — Consultar todas las propiedades ──
-router.get('/', (req, res) => {
-  connection.query('SELECT * FROM propiedad', (error, results) => {
-    if (error) {
-      res.status(500).json({ error: 'Error consultando propiedades' });
-      return;
-    }
-    res.json(results);
-  });
-});
+router.get('/', obtenerPropiedades);
 
 // ── POST /propiedades — Crear una propiedad nueva ──
-router.post('/', (req, res) => {
-  const {
-    titulo, descripcion, precio, area_m2,
-    habitaciones, banos, tipo_operacion,
-    tipo_inmueble, estado, id_usuario,
-    id_ubicacion, video, fotos
-  } = req.body;
-
-  const query = `
-    INSERT INTO propiedad (
-      titulo, descripcion, precio, area_m2,
-      habitaciones, banos, tipo_operacion,
-      tipo_inmueble, estado, id_usuario,
-      id_ubicacion, video, fotos
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `;
-
-  const valores = [
-    titulo, descripcion, precio, area_m2,
-    habitaciones, banos, tipo_operacion,
-    tipo_inmueble, estado, id_usuario,
-    id_ubicacion, video, fotos
-  ];
-
-  connection.query(query, valores, (error, results) => {
-    if (error) {
-      res.status(500).json({ error: 'Error guardando propiedad', detalle: error.message });
-      return;
-    }
-    res.json({ mensaje: '✅ Propiedad guardada correctamente', id: results.insertId });
-  });
-});
-
-module.exports = router;
-
+router.post('/', guardarPropiedad);
 
 // ── PUT /propiedades/:id — Actualizar una propiedad ──
-router.put('/:id', (req, res) => {
-  const { id } = req.params;
-  const { titulo, precio, estado } = req.body;
-
-  const query = `
-    UPDATE propiedad 
-    SET titulo = ?, precio = ?, estado = ?
-    WHERE id_propiedad = ?
-  `;
-
-  connection.query(query, [titulo, precio, estado, id], (error, results) => {
-    if (error) {
-      res.status(500).json({ error: 'Error actualizando propiedad', detalle: error.message });
-      return;
-    }
-    res.json({ mensaje: '✅ Propiedad actualizada correctamente' });
-  });
-});
-
+router.put('/:id', actualizarPropiedad);
 
 // ── DELETE /propiedades/:id — Eliminar una propiedad ──
-router.delete('/:id', (req, res) => {
-  const { id } = req.params;
+router.delete('/:id', eliminarPropiedad);
 
-  const query = `DELETE FROM propiedad WHERE id_propiedad = ?`;
-
-  connection.query(query, [id], (error, results) => {
-    if (error) {
-      res.status(500).json({ error: 'Error eliminando propiedad', detalle: error.message });
-      return;
-    }
-    res.json({ mensaje: '✅ Propiedad eliminada correctamente' });
-  });
-});
+module.exports = router;
