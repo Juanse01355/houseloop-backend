@@ -53,3 +53,40 @@ router.post('/', (req, res) => {
 });
 
 module.exports = router;
+
+
+// ── PUT /propiedades/:id — Actualizar una propiedad ──
+router.put('/:id', (req, res) => {
+  const { id } = req.params;
+  const { titulo, precio, estado } = req.body;
+
+  const query = `
+    UPDATE propiedad 
+    SET titulo = ?, precio = ?, estado = ?
+    WHERE id_propiedad = ?
+  `;
+
+  connection.query(query, [titulo, precio, estado, id], (error, results) => {
+    if (error) {
+      res.status(500).json({ error: 'Error actualizando propiedad', detalle: error.message });
+      return;
+    }
+    res.json({ mensaje: '✅ Propiedad actualizada correctamente' });
+  });
+});
+
+
+// ── DELETE /propiedades/:id — Eliminar una propiedad ──
+router.delete('/:id', (req, res) => {
+  const { id } = req.params;
+
+  const query = `DELETE FROM propiedad WHERE id_propiedad = ?`;
+
+  connection.query(query, [id], (error, results) => {
+    if (error) {
+      res.status(500).json({ error: 'Error eliminando propiedad', detalle: error.message });
+      return;
+    }
+    res.json({ mensaje: '✅ Propiedad eliminada correctamente' });
+  });
+});
