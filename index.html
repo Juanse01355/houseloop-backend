@@ -114,6 +114,35 @@
     </div>
     <button type="submit">Guardar Propiedad</button>
   </form>
+  <!-- ── LISTA DE PROPIEDADES ── -->
+  <h2>Propiedades registradas</h2>
+  <button onclick="cargarPropiedades()" style="width:auto; padding: 10px 20px; margin-bottom: 16px;">
+    Ver propiedades
+  </button>
+  <div id="lista-propiedades"></div>
 
+  <script>
+  async function cargarPropiedades() {
+    const response = await fetch('/propiedades');
+    const propiedades = await response.json();
+    
+    const lista = document.getElementById('lista-propiedades');
+    
+    if (propiedades.length === 0) {
+      lista.innerHTML = '<p>No hay propiedades registradas.</p>';
+      return;
+    }
+
+    lista.innerHTML = propiedades.map(p => `
+      <div style="border: 1px solid #E0E0E0; border-radius: 8px; padding: 16px; margin-bottom: 12px;">
+        <h3 style="color: #F36162; margin: 0 0 8px 0;">${p.titulo}</h3>
+        <p><b>Precio:</b> $${p.precio}</p>
+        <p><b>Tipo:</b> ${p.tipo_operacion} — ${p.tipo_inmueble}</p>
+        <p><b>Estado:</b> ${p.estado}</p>
+        <p><b>Descripción:</b> ${p.descripcion}</p>
+      </div>
+    `).join('');
+  }
+</script>
 </body>
 </html>
