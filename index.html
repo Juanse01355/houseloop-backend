@@ -15,14 +15,8 @@
     }
     h1 { color: #F36162; }
     h2 { color: #1C150F; margin-top: 40px; }
-    .form-group {
-      margin-bottom: 16px;
-    }
-    label {
-      display: block;
-      font-weight: 600;
-      margin-bottom: 6px;
-    }
+    .form-group { margin-bottom: 16px; }
+    label { display: block; font-weight: 600; margin-bottom: 6px; }
     input, select, textarea {
       width: 100%;
       padding: 10px;
@@ -58,19 +52,65 @@
       <input type="text" name="titulo" placeholder="Ej: Apartamento en el centro" required>
     </div>
     <div class="form-group">
+      <label>Descripción</label>
+      <textarea name="descripcion" rows="3" placeholder="Describe la propiedad..." required></textarea>
+    </div>
+    <div class="form-group">
       <label>Precio</label>
       <input type="number" name="precio" placeholder="Ej: 350000000" required>
     </div>
     <div class="form-group">
-      <label>Tipo</label>
-      <select name="tipo">
+      <label>Área m²</label>
+      <input type="number" name="area_m2" placeholder="Ej: 80">
+    </div>
+    <div class="form-group">
+      <label>Habitaciones</label>
+      <input type="number" name="habitaciones" placeholder="Ej: 3">
+    </div>
+    <div class="form-group">
+      <label>Baños</label>
+      <input type="number" name="banos" placeholder="Ej: 2">
+    </div>
+    <div class="form-group">
+      <label>Tipo de operación</label>
+      <select name="tipo_operacion" required>
         <option value="venta">Venta</option>
         <option value="arriendo">Arriendo</option>
       </select>
     </div>
     <div class="form-group">
-      <label>Descripción</label>
-      <textarea name="descripcion" rows="3" placeholder="Describe la propiedad..."></textarea>
+      <label>Tipo de inmueble</label>
+      <select name="tipo_inmueble">
+        <option value="casa">Casa</option>
+        <option value="apartamento">Apartamento</option>
+        <option value="local">Local</option>
+        <option value="lote">Lote</option>
+        <option value="finca">Finca</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Estado</label>
+      <select name="estado" required>
+        <option value="disponible">Disponible</option>
+        <option value="vendido">Vendido</option>
+        <option value="arrendado">Arrendado</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>ID Usuario</label>
+      <input type="text" name="id_usuario" placeholder="Ej: USR001" required>
+    </div>
+    <div class="form-group">
+      <label>ID Ubicación</label>
+      <input type="text" name="id_ubicacion" placeholder="Ej: UBI001" required>
+    </div>
+    <div class="form-group">
+      <label>URL Video</label>
+      <input type="text" name="video" placeholder="Ej: https://video.com/propiedad1">
+    </div>
+    <div class="form-group">
+      <label>URLs Fotos (separadas por coma)</label>
+      <input type="text" name="fotos" placeholder="Ej: foto1.jpg, foto2.jpg">
     </div>
     <button type="submit">Guardar Propiedad</button>
   </form>

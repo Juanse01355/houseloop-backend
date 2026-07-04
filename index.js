@@ -6,6 +6,7 @@
 const express = require('express');
 const app = express();
 const path = require('path');
+const propertyRoutes = require('./src/routes/property-routes');
 
 // Puerto del servidor
 const PORT = 3000;
@@ -18,6 +19,9 @@ app.use(express.urlencoded({ extended: true }));
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
+
+// Rutas de propiedades
+app.use('/propiedades', propertyRoutes);
 
 // Iniciar servidor
 app.listen(PORT, () => {
