@@ -9,11 +9,15 @@ const {
   obtenerPropiedades,
   guardarPropiedad,
   actualizarPropiedad,
-  eliminarPropiedad
+  eliminarPropiedad,
+  obtenerFeed,
 } = require('../controllers/property-controller');
 
 // ── GET /propiedades — Consultar todas las propiedades ──
 router.get('/', obtenerPropiedades);
+
+// ── GET /propiedades/feed — Consultar el feed de propiedades ──
+router.get('/feed', obtenerFeed);
 
 // ── POST /propiedades — Crear una propiedad nueva ──
 router.post('/', guardarPropiedad);
