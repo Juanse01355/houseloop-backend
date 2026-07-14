@@ -32,10 +32,18 @@ const express = require('express');
 const app = express();
 const path = require('path');
 const propertyRoutes = require('./src/routes/property-routes');
+// Importa la librería CORS para permitir peticiones
+// desde el frontend de React Native al backend
+const cors = require('cors');
+// Habilita CORS para aceptar peticiones desde cualquier origen
+// Necesario para que React Native pueda conectarse al backend
+app.use(cors());
 
 // Puerto del servidor — usa el valor del .env o 3000 por defecto
 // Si en .env dice PORT=3000, usa ese. Si no existe el .env, usa 3000.
 const PORT = process.env.PORT || 3000;
+
+
 
 // Middleware para recibir JSON:Convierte automáticamente los datos enviados en formato JSON, en un objeto de JavaScript para poder acceder a ellos mediante req.body.
 app.use(express.json());
