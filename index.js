@@ -32,9 +32,15 @@ const express = require('express');
 const app = express();
 const path = require('path');
 const propertyRoutes = require('./src/routes/property-routes');
+
+// Importa las rutas de autenticación que gestionan las solicitudes
+// relacionadas con el registro e inicio de sesión de usuarios.
+const authRoutes = require('./src/routes/auth-routes');
+
 // Importa la librería CORS para permitir peticiones
 // desde el frontend de React Native al backend
 const cors = require('cors');
+
 // Habilita CORS para aceptar peticiones desde cualquier origen
 // Necesario para que React Native pueda conectarse al backend
 app.use(cors());
@@ -65,6 +71,11 @@ app.get('/', (req, res) => {
 
 // Rutas de propiedades
 app.use('/propiedades', propertyRoutes);
+
+// Registra las rutas de autenticación en la aplicación,
+// asignando el prefijo /auth para gestionar las solicitudes
+// de registro e inicio de sesión.
+app.use('/auth', authRoutes);
 
 // Iniciar servidor
 app.listen(PORT, () => {
