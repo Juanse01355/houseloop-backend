@@ -77,6 +77,15 @@ app.use('/propiedades', propertyRoutes);
 // de registro e inicio de sesión.
 app.use('/auth', authRoutes);
 
+// Importamos el archivo de rutas del módulo de perfil.
+// Ese archivo (src/routes/usuario-routes.js) es el que decide
+// qué función del controller responde a cada endpoint.
+const usuarioRoutes = require('./src/routes/usuario-routes');
+
+// Le decimos a Express: "todo lo que llegue a una URL que empiece
+// con /api/perfil, mandalo a usuario-routes.js para que decida qué hacer"
+app.use('/api/perfil', usuarioRoutes);
+
 // Iniciar servidor
 app.listen(PORT, () => {
   console.log(`✅ Servidor corriendo en http://localhost:${PORT}`);

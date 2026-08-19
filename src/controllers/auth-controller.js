@@ -118,6 +118,7 @@ const iniciarSesion = async (req, res) => {
             id:     usuario.id_usuario,
             nombre: usuario.nombre,
             correo: usuario.correo,
+            foto:   usuario.foto_perfil_url,
           }
         });
       }
