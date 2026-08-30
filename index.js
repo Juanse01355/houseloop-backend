@@ -37,6 +37,10 @@ const propertyRoutes = require('./src/routes/property-routes');
 // relacionadas con el registro e inicio de sesión de usuarios.
 const authRoutes = require('./src/routes/auth-routes');
 
+// Importa las rutas de subida de archivos (video + fotos) que usa
+// la pantalla de "Publicar inmueble" antes de guardar la propiedad.
+const uploadRoutes = require('./src/routes/upload-routes');
+
 // Importa la librería CORS para permitir peticiones
 // desde el frontend de React Native al backend
 const cors = require('cors');
@@ -47,7 +51,7 @@ app.use(cors());
 
 // Puerto del servidor — usa el valor del .env o 3000 por defecto
 // Si en .env dice PORT=3000, usa ese. Si no existe el .env, usa 3000.
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3300;
 
 
 
@@ -64,6 +68,14 @@ app.use(express.urlencoded({ extended: true }));
 // un servidor de archivos local para toda la app HouseLoop.
 app.use('/videos', express.static('videos'));
 
+// ── Archivos estáticos — Uploads (video + fotos de publicaciones) ──
+// Multer (upload-middleware.js) guarda los archivos físicamente en
+// uploads/videos y uploads/fotos, en la raíz del backend. Esta línea
+// hace que esas carpetas sean accesibles por HTTP, para que las URLs
+// que arma upload-controller.js (http://IP:PUERTO/uploads/videos/xxx.mp4)
+// realmente sirvan el archivo en vez de devolver 404.
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 // Ruta de prueba
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
@@ -77,6 +89,12 @@ app.use('/propiedades', propertyRoutes);
 // de registro e inicio de sesión.
 app.use('/auth', authRoutes);
 
+// Registra las rutas de subida de archivos, asignando el prefijo
+// /upload. Es la ruta que llama subirArchivos() en publish.jsx
+// antes de crear la propiedad, para obtener las URLs reales del
+// video y las fotos.
+app.use('/upload', uploadRoutes);
+
 // Importamos el archivo de rutas del módulo de perfil.
 // Ese archivo (src/routes/usuario-routes.js) es el que decide
 // qué función del controller responde a cada endpoint.
@@ -88,5 +106,5 @@ app.use('/api/perfil', usuarioRoutes);
 
 // Iniciar servidor
 app.listen(PORT, () => {
-  console.log(`✅ Servidor corriendo en http://localhost:${PORT}`);
+  console.log(`✅ Servidor corriendo en http://192.168.1.24:${PORT}`);
 });

@@ -11,6 +11,7 @@ const {
   actualizarPropiedad,
   eliminarPropiedad,
   obtenerFeed,
+  obtenerPropiedadesPorUsuario,
 } = require('../controllers/property-controller');
 
 // ── GET /propiedades — Consultar todas las propiedades ──
@@ -27,5 +28,8 @@ router.put('/:id', actualizarPropiedad);
 
 // ── DELETE /propiedades/:id — Eliminar una propiedad ──
 router.delete('/:id', eliminarPropiedad);
+
+// ── GET /propiedades/usuario/:id — Consultar las propiedades de un usuario ──
+router.get('/usuario/:id', obtenerPropiedadesPorUsuario);
 
 module.exports = router;

@@ -14,8 +14,8 @@ const obtenerPerfil = (req, res) => {
   // db.query recibe: la consulta SQL, los parámetros (reemplazan
   // los "?" en orden), y un callback que se ejecuta al terminar
   db.query(
-    `SELECT id_usuario, nombre, correo, fecha_registro
-     FROM usuario WHERE id_usuario = ?`,
+     `SELECT id_usuario, nombre, correo, foto_perfil_url, fecha_registro
+      FROM usuario WHERE id_usuario = ?`,
     [idUsuario],
     (error, results) => {
       // Si algo falló en la consulta (ej: error de conexión,
@@ -69,5 +69,33 @@ const actualizarPerfil = (req, res) => {
     }
   );
 };
+// Función para POST /api/perfil/foto
+// Multer (upload-perfil-middleware.js) ya guardó el archivo en
+// disco antes de que esta función se ejecute. Aquí armamos la
+// URL pública y la guardamos en la base de datos.
+const subirFotoPerfil = (req, res) => {
+  const idUsuario = req.usuario.id;
 
-module.exports = { obtenerPerfil, actualizarPerfil };
+  if (!req.file) {
+    return res.status(400).json({ mensaje: 'No se recibió ninguna imagen' });
+  }
+
+  const host = `${req.protocol}://${req.get('host')}`;
+  const fotoUrl = `${host}/uploads/perfiles/${req.file.filename}`;
+
+  db.query(
+    `UPDATE usuario SET foto_perfil_url = ?, fecha_actualizacion = NOW()
+     WHERE id_usuario = ?`,
+    [fotoUrl, idUsuario],
+    (error, results) => {
+      if (error) {
+        console.error(error);
+        return res.status(500).json({ mensaje: 'Error al guardar la foto de perfil' });
+      }
+
+      res.status(200).json({ mensaje: 'Foto de perfil actualizada', foto_perfil_url: fotoUrl });
+    }
+  );
+};
+
+module.exports = { obtenerPerfil, actualizarPerfil, subirFotoPerfil };
