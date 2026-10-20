@@ -4,6 +4,7 @@
 // como último argumento, que se ejecuta cuando MySQL responde.
 
 const db = require('../db/connection');
+const { hostDe, urlPublica } = require('../utils/urls');
 
 // Función para GET /api/perfil
 // req.usuario.id viene del middleware (auth-middleware.js),
@@ -31,10 +32,14 @@ const obtenerPerfil = (req, res) => {
         return res.status(404).json({ mensaje: 'Usuario no encontrado' });
       }
 
-      // Si todo salió bien, results[0] tiene los datos del usuario
-      // (results es un array porque SELECT siempre devuelve filas,
-      // pero acá solo esperamos una)
-      res.status(200).json(results[0]);
+      // La foto se guarda como ruta ("/uploads/perfiles/xxx.jpg");
+      // aquí se completa con la dirección actual del servidor.
+      const perfil = {
+        ...results[0],
+        foto_perfil_url: urlPublica(req, results[0].foto_perfil_url),
+      };
+
+      res.status(200).json(perfil);
     }
   );
 };
@@ -47,6 +52,12 @@ const actualizarPerfil = (req, res) => {
   // Validación básica: ambos campos son obligatorios
   if (!nombre || !correo) {
     return res.status(400).json({ mensaje: 'Nombre y correo son obligatorios' });
+  }
+
+  // Validación de formato del correo
+  const correoRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!correoRegex.test(correo)) {
+    return res.status(400).json({ mensaje: 'El correo no tiene un formato válido' });
   }
 
   db.query(
@@ -69,10 +80,12 @@ const actualizarPerfil = (req, res) => {
     }
   );
 };
+
 // Función para POST /api/perfil/foto
 // Multer (upload-perfil-middleware.js) ya guardó el archivo en
-// disco antes de que esta función se ejecute. Aquí armamos la
-// URL pública y la guardamos en la base de datos.
+// disco antes de que esta función se ejecute. Aquí guardamos en la
+// base de datos SOLO la ruta (sin IP) y respondemos con la URL
+// completa para que el frontend la muestre de inmediato.
 const subirFotoPerfil = (req, res) => {
   const idUsuario = req.usuario.id;
 
@@ -80,20 +93,22 @@ const subirFotoPerfil = (req, res) => {
     return res.status(400).json({ mensaje: 'No se recibió ninguna imagen' });
   }
 
-  const host = `${req.protocol}://${req.get('host')}`;
-  const fotoUrl = `${host}/uploads/perfiles/${req.file.filename}`;
+  const rutaFoto = `/uploads/perfiles/${req.file.filename}`;
 
   db.query(
     `UPDATE usuario SET foto_perfil_url = ?, fecha_actualizacion = NOW()
      WHERE id_usuario = ?`,
-    [fotoUrl, idUsuario],
+    [rutaFoto, idUsuario],
     (error, results) => {
       if (error) {
         console.error(error);
         return res.status(500).json({ mensaje: 'Error al guardar la foto de perfil' });
       }
 
-      res.status(200).json({ mensaje: 'Foto de perfil actualizada', foto_perfil_url: fotoUrl });
+      res.status(200).json({
+        mensaje: 'Foto de perfil actualizada',
+        foto_perfil_url: `${hostDe(req)}${rutaFoto}`,
+      });
     }
   );
 };

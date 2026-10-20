@@ -31,80 +31,59 @@ require('dotenv').config();
 const express = require('express');
 const app = express();
 const path = require('path');
-const propertyRoutes = require('./src/routes/property-routes');
-
-// Importa las rutas de autenticación que gestionan las solicitudes
-// relacionadas con el registro e inicio de sesión de usuarios.
-const authRoutes = require('./src/routes/auth-routes');
-
-// Importa las rutas de subida de archivos (video + fotos) que usa
-// la pantalla de "Publicar inmueble" antes de guardar la propiedad.
-const uploadRoutes = require('./src/routes/upload-routes');
-
-// Importa la librería CORS para permitir peticiones
-// desde el frontend de React Native al backend
 const cors = require('cors');
 
-// Habilita CORS para aceptar peticiones desde cualquier origen
-// Necesario para que React Native pueda conectarse al backend
-app.use(cors());
+// ── Importación de rutas ──
+const propertyRoutes = require('./src/routes/property-routes');
+const authRoutes = require('./src/routes/auth-routes');       // Registro e inicio de sesión
+const uploadRoutes = require('./src/routes/upload-routes');   // Subida de video + fotos
+const usuarioRoutes = require('./src/routes/usuario-routes'); // Módulo de perfil
 
-// Puerto del servidor — usa el valor del .env o 3000 por defecto
-// Si en .env dice PORT=3000, usa ese. Si no existe el .env, usa 3000.
+// Puerto del servidor — usa el valor del .env o 3300 por defecto
 const PORT = process.env.PORT || 3300;
 
+// Habilita CORS para aceptar peticiones desde cualquier origen.
+// Necesario para que el navegador (localhost:8081) y el celular
+// puedan conectarse al backend. En producción conviene limitarlo
+// al dominio real del frontend.
+app.use(cors());
 
-
-// Middleware para recibir JSON:Convierte automáticamente los datos enviados en formato JSON, en un objeto de JavaScript para poder acceder a ellos mediante req.body.
+// Middleware para recibir JSON: convierte automáticamente los datos
+// enviados en formato JSON en un objeto de JavaScript (req.body).
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ── Archivos estáticos — Videos ──
-// Permite que React Native acceda directamente a los videos
-// almacenados en la carpeta /videos del backend a través de la red local.
-// Ejemplo: http://192.168.1.X:3000/videos/prueba.mp4
-// Sin esta línea, Express no sabría cómo entregar archivos multimedia,
-// solo respondería con datos JSON. Con esta línea actúa como
-// un servidor de archivos local para toda la app HouseLoop.
+// Permite acceder a los videos de la carpeta /videos a través de la red.
+// Ejemplo: http://TU_IP:3300/videos/prueba.mp4
 app.use('/videos', express.static('videos'));
 
 // ── Archivos estáticos — Uploads (video + fotos de publicaciones) ──
-// Multer (upload-middleware.js) guarda los archivos físicamente en
-// uploads/videos y uploads/fotos, en la raíz del backend. Esta línea
-// hace que esas carpetas sean accesibles por HTTP, para que las URLs
-// que arma upload-controller.js (http://IP:PUERTO/uploads/videos/xxx.mp4)
-// realmente sirvan el archivo en vez de devolver 404.
+// Multer guarda los archivos en uploads/videos y uploads/fotos.
+// Esta línea los hace accesibles por HTTP.
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Ruta de prueba
+// ── Ruta de prueba ──
+// Sirve para comprobar rápido (desde el PC o el celular) que la API responde.
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+  res.json({ mensaje: 'HouseLoop API funcionando' });
 });
 
-// Rutas de propiedades
+// ── Rutas de la API ──
 app.use('/propiedades', propertyRoutes);
-
-// Registra las rutas de autenticación en la aplicación,
-// asignando el prefijo /auth para gestionar las solicitudes
-// de registro e inicio de sesión.
 app.use('/auth', authRoutes);
-
-// Registra las rutas de subida de archivos, asignando el prefijo
-// /upload. Es la ruta que llama subirArchivos() en publish.jsx
-// antes de crear la propiedad, para obtener las URLs reales del
-// video y las fotos.
 app.use('/upload', uploadRoutes);
-
-// Importamos el archivo de rutas del módulo de perfil.
-// Ese archivo (src/routes/usuario-routes.js) es el que decide
-// qué función del controller responde a cada endpoint.
-const usuarioRoutes = require('./src/routes/usuario-routes');
-
-// Le decimos a Express: "todo lo que llegue a una URL que empiece
-// con /api/perfil, mandalo a usuario-routes.js para que decida qué hacer"
 app.use('/api/perfil', usuarioRoutes);
 
-// Iniciar servidor
-app.listen(PORT, () => {
-  console.log(`✅ Servidor corriendo en http://192.168.1.24:${PORT}`);
+// ── Manejo de rutas no encontradas (404) ──
+// Si ninguna ruta anterior coincidió, la API responde siempre en JSON.
+app.use((req, res) => {
+  res.status(404).json({ mensaje: 'Ruta no encontrada' });
+});
+
+// ── Iniciar servidor ──
+// "0.0.0.0" hace que escuche en todas las interfaces de red,
+// así el celular puede conectarse, no solo el propio PC.
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Servidor HouseLoop escuchando en el puerto ${PORT}`);
 });
