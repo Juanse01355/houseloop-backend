@@ -3,18 +3,16 @@
 //   Módulo principal del sistema de bienes raíces
 //   Arquitectura: MVC — Capa de Control
 //
-//   IMPORTANTE: este archivo reemplaza por completo tu
-//   property-controller.js actual.
-//
-//   Requiere el paquete "uuid". Si no lo tienes instalado:
-//     npm install uuid
-//
-//   Requiere también: src/utils/urls.js
+//   Requiere el paquete "uuid" y src/utils/urls.js
 //
 //   URLs de archivos: en la base de datos se guarda SOLO la ruta
 //   ("/uploads/videos/xxx.mp4"). Al responder, se le antepone la
-//   dirección con la que el cliente llamó al servidor. Así no
-//   importa si cambia la IP, la red o el servidor.
+//   dirección con la que el cliente llamó al servidor.
+//
+//   BASE DE DATOS: "connection" es un POOL de conexiones.
+//   - Consultas simples: connection.query(...) funciona igual.
+//   - Transacciones: se pide una conexión con connection.getConnection,
+//     se usa para todos los pasos y SIEMPRE se devuelve con release().
 // ============================================================
 
 const connection = require('../db/connection');
@@ -68,9 +66,8 @@ const obtenerPropiedades = (req, res) => {
  * video, miniatura y fotos pueden llegar como URL completa (la que
  * devuelve /upload); aquí se les quita el host y se guarda solo la ruta.
  *
- * NOTA: tanto id_propiedad como id_ubicacion son varchar en la base
- * de datos (no autoincrementales), así que este controlador genera
- * ambos identificadores manualmente con uuid antes de insertar.
+ * NOTA: id_propiedad e id_ubicacion son varchar (no autoincrementales),
+ * así que se generan aquí con uuid antes de insertar.
  */
 const guardarPropiedad = (req, res) => {
   const {
@@ -103,104 +100,93 @@ const guardarPropiedad = (req, res) => {
   const videoRuta = rutaRelativa(video) || null;
   const miniaturaRuta = rutaRelativa(miniatura) || null;
 
-  connection.beginTransaction((errTx) => {
-    if (errTx) {
-      return res.status(500).json({ error: 'Error iniciando la transacción', detalle: errTx.message });
+  const id_ubicacion = uuidv4();
+  const id_propiedad = uuidv4();
+
+  // Pedimos UNA conexión del pool para toda la transacción
+  connection.getConnection((errConn, conn) => {
+    if (errConn) {
+      return res.status(500).json({ error: 'Error obteniendo conexión a la base de datos', detalle: errConn.message });
     }
 
-    // 1. Crear la ubicación
-    const id_ubicacion = uuidv4();
-    const queryUbicacion = `
-      INSERT INTO ubicacion (id_ubicacion, ciudad, barrio, direccion, latitud, longitud, geohash)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `;
-    const valoresUbicacion = [id_ubicacion, ciudad, barrio || null, direccion, aNumeroONull(latitud), aNumeroONull(longitud), null];
+    // Deshace todo, devuelve la conexión al pool y responde el error
+    const fallar = (mensaje, err) =>
+      conn.rollback(() => {
+        conn.release();
+        res.status(500).json({ error: mensaje, detalle: err.message });
+      });
 
-    connection.query(queryUbicacion, valoresUbicacion, (errUbicacion) => {
-      if (errUbicacion) {
-        return connection.rollback(() => {
-          res.status(500).json({ error: 'Error guardando la ubicación', detalle: errUbicacion.message });
-        });
+    // Confirma la transacción, devuelve la conexión al pool y responde OK
+    const terminar = (mensaje) =>
+      conn.commit((errCommit) => {
+        if (errCommit) return fallar('Error confirmando la transacción', errCommit);
+        conn.release();
+        res.status(201).json({ mensaje, id_propiedad, id_ubicacion });
+      });
+
+    conn.beginTransaction((errTx) => {
+      if (errTx) {
+        conn.release();
+        return res.status(500).json({ error: 'Error iniciando la transacción', detalle: errTx.message });
       }
 
-      // 2. Crear la propiedad (id_propiedad es varchar, se genera aquí)
-      const id_propiedad = uuidv4();
-      const queryPropiedad = `
-        INSERT INTO propiedad (
-          id_propiedad, titulo, descripcion, precio, area_m2,
-          habitaciones, banos, tipo_operacion,
-          tipo_inmueble, estado, id_usuario,
-          id_ubicacion, video, miniatura, fecha_publicacion
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      // 1. Crear la ubicación
+      const queryUbicacion = `
+        INSERT INTO ubicacion (id_ubicacion, ciudad, barrio, direccion, latitud, longitud, geohash)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `;
-      const valoresPropiedad = [
-        id_propiedad,
-        titulo,
-        descripcion,
-        precio,
-        area_m2 || null,
-        habitaciones || 0,
-        banos || 0,
-        tipo_operacion,
-        tipo_inmueble,
-        estado || 'disponible',
-        id_usuario,
-        id_ubicacion,
-        videoRuta,
-        miniaturaRuta,
-      ];
+      const valoresUbicacion = [id_ubicacion, ciudad, barrio || null, direccion, aNumeroONull(latitud), aNumeroONull(longitud), null];
 
-      connection.query(queryPropiedad, valoresPropiedad, (errPropiedad) => {
-        if (errPropiedad) {
-          return connection.rollback(() => {
-            res.status(500).json({ error: 'Error guardando la propiedad', detalle: errPropiedad.message });
-          });
-        }
+      conn.query(queryUbicacion, valoresUbicacion, (errUbicacion) => {
+        if (errUbicacion) return fallar('Error guardando la ubicación', errUbicacion);
 
-        // 3. Insertar las fotos como filas en la tabla media
-        //    (el video ya quedó guardado directo en propiedad.video)
-        const archivosMedia = [];
-        if (Array.isArray(fotos)) {
-          fotos.forEach((url) =>
-            archivosMedia.push([uuidv4(), id_propiedad, rutaRelativa(url), 'foto'])
-          );
-        }
+        // 2. Crear la propiedad
+        const queryPropiedad = `
+          INSERT INTO propiedad (
+            id_propiedad, titulo, descripcion, precio, area_m2,
+            habitaciones, banos, tipo_operacion,
+            tipo_inmueble, estado, id_usuario,
+            id_ubicacion, video, miniatura, fecha_publicacion
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        `;
+        const valoresPropiedad = [
+          id_propiedad,
+          titulo,
+          descripcion,
+          precio,
+          area_m2 || null,
+          habitaciones || 0,
+          banos || 0,
+          tipo_operacion,
+          tipo_inmueble,
+          estado || 'disponible',
+          id_usuario,
+          id_ubicacion,
+          videoRuta,
+          miniaturaRuta,
+        ];
 
-        if (archivosMedia.length === 0) {
-          return connection.commit((errCommit) => {
-            if (errCommit) {
-              return connection.rollback(() => {
-                res.status(500).json({ error: 'Error confirmando la transacción', detalle: errCommit.message });
-              });
-            }
-            res.status(201).json({
-              mensaje: '✅ Propiedad guardada correctamente (sin fotos)',
-              id_propiedad,
-              id_ubicacion,
-            });
-          });
-        }
+        conn.query(queryPropiedad, valoresPropiedad, (errPropiedad) => {
+          if (errPropiedad) return fallar('Error guardando la propiedad', errPropiedad);
 
-        const queryMedia = 'INSERT INTO media (id_media, id_propiedad, url, tipo_media) VALUES ?';
-
-        connection.query(queryMedia, [archivosMedia], (errMedia) => {
-          if (errMedia) {
-            return connection.rollback(() => {
-              res.status(500).json({ error: 'Error guardando fotos', detalle: errMedia.message });
-            });
+          // 3. Insertar las fotos como filas en la tabla media
+          //    (el video ya quedó guardado directo en propiedad.video)
+          const archivosMedia = [];
+          if (Array.isArray(fotos)) {
+            fotos.forEach((url) =>
+              archivosMedia.push([uuidv4(), id_propiedad, rutaRelativa(url), 'foto'])
+            );
           }
 
-          connection.commit((errCommit) => {
-            if (errCommit) {
-              return connection.rollback(() => {
-                res.status(500).json({ error: 'Error confirmando la transacción', detalle: errCommit.message });
-              });
-            }
-            res.status(201).json({
-              mensaje: '✅ Propiedad guardada correctamente',
-              id_propiedad,
-              id_ubicacion,
-            });
+          if (archivosMedia.length === 0) {
+            return terminar('✅ Propiedad guardada correctamente (sin fotos)');
+          }
+
+          const queryMedia = 'INSERT INTO media (id_media, id_propiedad, url, tipo_media) VALUES ?';
+
+          conn.query(queryMedia, [archivosMedia], (errMedia) => {
+            if (errMedia) return fallar('Error guardando fotos', errMedia);
+            terminar('✅ Propiedad guardada correctamente');
           });
         });
       });
@@ -214,12 +200,9 @@ const guardarPropiedad = (req, res) => {
  * Método HTTP: PUT
  * Ruta: /propiedades/:id   (protegida con verificarToken)
  * Solo puede editarla el dueño (se compara con req.usuario.id del JWT).
- * Recibe (desde publish.jsx en modo edición): ciudad, direccion, barrio,
- *   latitud, longitud, titulo, descripcion, precio, area_m2, habitaciones,
- *   banos, tipo_operacion, tipo_inmueble, video, miniatura, fotos
  *
  * - video / miniatura: si llegan, se guardan; se les quita el host.
- * - fotos: si llega un arreglo, REEMPLAZA las fotos actuales de la propiedad.
+ * - fotos: si llega un arreglo, REEMPLAZA las fotos actuales.
  * - latitud / longitud: si llegan, actualizan el punto; si no, se conserva el anterior.
  */
 const actualizarPropiedad = (req, res) => {
@@ -269,80 +252,92 @@ const actualizarPropiedad = (req, res) => {
       // Si no llegó miniatura nueva, se conserva la que ya tenía
       const miniaturaFinal = miniaturaRuta || filas[0].miniatura;
 
-      const fallar = (mensaje, err) =>
-        connection.rollback(() => {
-          res.status(500).json({ error: mensaje, detalle: err.message });
-        });
-
-      connection.beginTransaction((errTx) => {
-        if (errTx) {
-          return res.status(500).json({ error: 'Error iniciando la transacción', detalle: errTx.message });
+      // Pedimos UNA conexión del pool para toda la transacción
+      connection.getConnection((errConn, conn) => {
+        if (errConn) {
+          return res.status(500).json({ error: 'Error obteniendo conexión a la base de datos', detalle: errConn.message });
         }
 
-        // 2. Actualizar la ubicación
-        connection.query(
-          'UPDATE ubicacion SET ciudad = ?, barrio = ?, direccion = ?, latitud = COALESCE(?, latitud), longitud = COALESCE(?, longitud) WHERE id_ubicacion = ?',
-          [ciudad, barrio || null, direccion, aNumeroONull(latitud), aNumeroONull(longitud), id_ubicacion],
-          (errUbi) => {
-            if (errUbi) return fallar('Error actualizando la ubicación', errUbi);
+        // Deshace todo, devuelve la conexión al pool y responde el error
+        const fallar = (mensaje, err) =>
+          conn.rollback(() => {
+            conn.release();
+            res.status(500).json({ error: mensaje, detalle: err.message });
+          });
 
-            // 3. Actualizar la propiedad
-            const queryPropiedad = `
-              UPDATE propiedad
-              SET titulo = ?, descripcion = ?, precio = ?, area_m2 = ?,
-                  habitaciones = ?, banos = ?, tipo_operacion = ?,
-                  tipo_inmueble = ?, video = ?, miniatura = ?
-              WHERE id_propiedad = ?
-            `;
-            const valores = [
-              titulo,
-              descripcion,
-              precio,
-              area_m2 || null,
-              habitaciones || 0,
-              banos || 0,
-              tipo_operacion,
-              tipo_inmueble,
-              videoRuta,
-              miniaturaFinal,
-              id,
-            ];
+        // Confirma la transacción, devuelve la conexión al pool y responde OK
+        const terminar = () =>
+          conn.commit((errCommit) => {
+            if (errCommit) return fallar('Error confirmando la transacción', errCommit);
+            conn.release();
+            res.json({ mensaje: '✅ Propiedad actualizada correctamente', id_propiedad: id });
+          });
 
-            connection.query(queryPropiedad, valores, (errProp) => {
-              if (errProp) return fallar('Error actualizando la propiedad', errProp);
-
-              const terminar = () =>
-                connection.commit((errCommit) => {
-                  if (errCommit) return fallar('Error confirmando la transacción', errCommit);
-                  res.json({ mensaje: '✅ Propiedad actualizada correctamente', id_propiedad: id });
-                });
-
-              // Si no llegó el arreglo de fotos, no se tocan las existentes
-              if (!Array.isArray(fotos)) return terminar();
-
-              // 4. Reemplazar las fotos: borrar las actuales e insertar las nuevas
-              connection.query(
-                "DELETE FROM media WHERE id_propiedad = ? AND tipo_media = 'foto'",
-                [id],
-                (errDel) => {
-                  if (errDel) return fallar('Error actualizando las fotos', errDel);
-
-                  if (fotos.length === 0) return terminar();
-
-                  const filasMedia = fotos.map((url) => [uuidv4(), id, rutaRelativa(url), 'foto']);
-                  connection.query(
-                    'INSERT INTO media (id_media, id_propiedad, url, tipo_media) VALUES ?',
-                    [filasMedia],
-                    (errIns) => {
-                      if (errIns) return fallar('Error guardando las fotos', errIns);
-                      terminar();
-                    }
-                  );
-                }
-              );
-            });
+        conn.beginTransaction((errTx) => {
+          if (errTx) {
+            conn.release();
+            return res.status(500).json({ error: 'Error iniciando la transacción', detalle: errTx.message });
           }
-        );
+
+          // 2. Actualizar la ubicación
+          conn.query(
+            'UPDATE ubicacion SET ciudad = ?, barrio = ?, direccion = ?, latitud = COALESCE(?, latitud), longitud = COALESCE(?, longitud) WHERE id_ubicacion = ?',
+            [ciudad, barrio || null, direccion, aNumeroONull(latitud), aNumeroONull(longitud), id_ubicacion],
+            (errUbi) => {
+              if (errUbi) return fallar('Error actualizando la ubicación', errUbi);
+
+              // 3. Actualizar la propiedad
+              const queryPropiedad = `
+                UPDATE propiedad
+                SET titulo = ?, descripcion = ?, precio = ?, area_m2 = ?,
+                    habitaciones = ?, banos = ?, tipo_operacion = ?,
+                    tipo_inmueble = ?, video = ?, miniatura = ?
+                WHERE id_propiedad = ?
+              `;
+              const valores = [
+                titulo,
+                descripcion,
+                precio,
+                area_m2 || null,
+                habitaciones || 0,
+                banos || 0,
+                tipo_operacion,
+                tipo_inmueble,
+                videoRuta,
+                miniaturaFinal,
+                id,
+              ];
+
+              conn.query(queryPropiedad, valores, (errProp) => {
+                if (errProp) return fallar('Error actualizando la propiedad', errProp);
+
+                // Si no llegó el arreglo de fotos, no se tocan las existentes
+                if (!Array.isArray(fotos)) return terminar();
+
+                // 4. Reemplazar las fotos: borrar las actuales e insertar las nuevas
+                conn.query(
+                  "DELETE FROM media WHERE id_propiedad = ? AND tipo_media = 'foto'",
+                  [id],
+                  (errDel) => {
+                    if (errDel) return fallar('Error actualizando las fotos', errDel);
+
+                    if (fotos.length === 0) return terminar();
+
+                    const filasMedia = fotos.map((url) => [uuidv4(), id, rutaRelativa(url), 'foto']);
+                    conn.query(
+                      'INSERT INTO media (id_media, id_propiedad, url, tipo_media) VALUES ?',
+                      [filasMedia],
+                      (errIns) => {
+                        if (errIns) return fallar('Error guardando las fotos', errIns);
+                        terminar();
+                      }
+                    );
+                  }
+                );
+              });
+            }
+          );
+        });
       });
     }
   );
@@ -370,9 +365,8 @@ const eliminarPropiedad = (req, res) => {
 
 /**
  * obtenerFeed
- * Consulta las propiedades visibles para mostrar en el feed principal:
- * las que están "disponible" o "en_negociacion". Las "no_disponible"
- * no aparecen en el feed (el dueño las sigue viendo en su perfil).
+ * Propiedades visibles en el feed principal: "disponible" o
+ * "en_negociacion". Las "no_disponible" no aparecen en el feed.
  * Método HTTP: GET
  * Ruta: /propiedades/feed
  * Incluye latitude / longitude (el punto exacto guardado) para el mapa.
@@ -423,16 +417,10 @@ const obtenerFeed = (req, res) => {
 
 /**
  * obtenerPropiedadesPorUsuario
- * Consulta y retorna todas las propiedades que pertenecen a un
- * usuario específico.
+ * Propiedades de un usuario específico.
  * Método HTTP: GET
  * Ruta: /propiedades/usuario/:id
- * Recibe: id — desde los parámetros de la URL (id del usuario dueño
- *         de las propiedades).
- * Respuesta: Array JSON con las propiedades de ese usuario, o un
- *            array vacío si no tiene ninguna.
- * Uso: Módulo Profile — grid de publicaciones del usuario en su
- *      propio perfil.
+ * Uso: Módulo Profile — grid de publicaciones del usuario.
  */
 const obtenerPropiedadesPorUsuario = (req, res) => {
   const { id } = req.params;
@@ -465,8 +453,6 @@ const obtenerPropiedadesPorUsuario = (req, res) => {
  * Suma 1 al contador de reproducciones de una propiedad (video).
  * Método HTTP: POST
  * Ruta: /propiedades/:id/reproduccion
- * Recibe: id — desde los parámetros de la URL (id_propiedad).
- * Respuesta: { ok: true } o 404 si la propiedad no existe.
  * Uso: Feed — se llama cuando un video lleva unos segundos visible.
  */
 const registrarReproduccion = (req, res) => {
@@ -493,15 +479,10 @@ const registrarReproduccion = (req, res) => {
 
 /**
  * obtenerPropiedadPorId
- * Retorna TODOS los datos de una propiedad para la pantalla de detalle:
- * datos de la propiedad, ubicación, información del propietario
- * (incluido su correo, que se usa para contactarlo) y el arreglo
- * de URLs de sus fotos.
+ * Todos los datos de una propiedad para la pantalla de detalle:
+ * propiedad, ubicación, propietario (con su correo) y fotos.
  * Método HTTP: GET
  * Ruta: /propiedades/:id
- * Recibe: id — desde los parámetros de la URL (id_propiedad).
- * Respuesta: objeto JSON con la propiedad, o 404 si no existe.
- * Uso: Módulo Detail — pantalla de detalle de una propiedad.
  *
  * IMPORTANTE: en property-routes.js esta ruta debe ir DESPUÉS de
  * /feed y /usuario/:id, o Express confundirá esas palabras con un id.
@@ -575,16 +556,10 @@ const obtenerPropiedadPorId = (req, res) => {
 
 /**
  * cambiarEstadoPropiedad
- * Cambia el estado de una propiedad: "disponible", "en_negociacion"
- * o "no_disponible". Solo puede hacerlo el usuario que la publicó.
+ * Cambia el estado: "disponible", "en_negociacion" o "no_disponible".
+ * Solo puede hacerlo el usuario que la publicó.
  * Método HTTP: PUT
  * Ruta: /propiedades/:id/estado   (protegida con verificarToken)
- * Recibe: id — desde la URL (id_propiedad)
- *         estado — desde el body (uno de los tres valores válidos)
- *         req.usuario.id — lo deja verificarToken a partir del JWT
- * Respuesta: { ok: true, estado } o un error:
- *   400 estado inválido | 403 no es el dueño | 404 no existe
- * Uso: Módulo Detail — el dueño cambia la disponibilidad de su propiedad.
  */
 const ESTADOS_VALIDOS = ['disponible', 'en_negociacion', 'no_disponible'];
 

@@ -1,28 +1,30 @@
-// ============================================================
-//   HOUSELOOP BACKEND — Conexión a MySQL
-//   Usa las variables de entorno del archivo .env
-//   para conectarse a la base de datos de XAMPP.
-//   Equivalente de JDBC en Java.
-// ============================================================
-
 const mysql = require('mysql2');
 
-// Configuración de la conexión usando variables de entorno
-// Si el .env no tiene el valor, usa el valor por defecto
-const connection = mysql.createConnection({
+// Pool de conexiones: reutiliza conexiones y se recupera solo si MySQL
+// cierra alguna por inactividad (lo que pasa en la nube).
+const pool = mysql.createPool({
   host:     process.env.DB_HOST     || 'localhost',
+  port:     Number(process.env.DB_PORT) || 3306,
   user:     process.env.DB_USER     || 'root',
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME     || 'houseloop',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 0,
+  // Las bases en la nube (Aiven, etc.) exigen SSL: DB_SSL=true en sus variables
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
 });
 
-// Verificar conexión al iniciar el servidor
-connection.connect((error) => {
+// Verifica la conexión al iniciar
+pool.getConnection((error, conn) => {
   if (error) {
-    console.error('❌ Error conectando a MySQL:', error);
+    console.error('❌ Error conectando a MySQL:', error.message);
     return;
   }
   console.log('✅ Conectado a MySQL correctamente');
+  conn.release();
 });
 
-module.exports = connection;
+module.exports = pool;
