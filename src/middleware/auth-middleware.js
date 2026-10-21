@@ -5,6 +5,9 @@
 
 const jwt = require('jsonwebtoken');
 
+// La clave secreta viene solo del entorno (.env): ya no hay clave de respaldo
+const { JWT_SECRET } = require('../config/jwt');
+
 const verificarToken = (req, res, next) => {
   try {
     // Leemos el header Authorization que debe venir como: Bearer <token>
@@ -22,14 +25,14 @@ const verificarToken = (req, res, next) => {
     // Verificamos que el token sea válido y no esté vencido,
     // usando la misma clave secreta (JWT_SECRET) con la que se firmó
     // en auth-controller.js al hacer login
-  const decoded = jwt.verify(token, process.env.JWT_SECRET || 'houseloop-secret-key');
+    const decoded = jwt.verify(token, JWT_SECRET);
 
     // Si llegamos hasta acá, el token es válido.
     // Guardamos los datos del usuario (que venían "adentro" del token)
     // en req.usuario, para que el controller los pueda usar después
     req.usuario = {
       id: decoded.id,
-      email: decoded.email
+      email: decoded.correo
     };
 
     // Dejamos pasar la petición a la siguiente función (el controller)

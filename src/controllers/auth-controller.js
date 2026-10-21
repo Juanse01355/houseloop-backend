@@ -10,9 +10,7 @@ const jwt        = require('jsonwebtoken');
 const connection = require('../db/connection');
 
 
-// Clave secreta para firmar los tokens JWT
-// En producción debe estar en el .env
-const JWT_SECRET = process.env.JWT_SECRET || 'houseloop-secret-key';
+const { JWT_SECRET } = require('../config/jwt');
 
 /**
  * registrarUsuario
