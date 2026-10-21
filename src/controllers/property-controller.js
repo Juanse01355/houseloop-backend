@@ -34,6 +34,10 @@ const conUrls = (req, fila) => {
   return copia;
 };
 
+// Convierte un valor (latitud / longitud) a número, o null si no es válido
+const aNumeroONull = (v) =>
+  v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v);
+
 /**
  * obtenerPropiedades
  * Consulta y retorna todas las propiedades registradas en la base de datos.
@@ -56,9 +60,10 @@ const obtenerPropiedades = (req, res) => {
  * en una sola transacción.
  * Método HTTP: POST
  * Ruta: /propiedades
- * Recibe (desde publish.jsx): ciudad, direccion, barrio, titulo,
- *   descripcion, precio, area_m2, habitaciones, banos, tipo_operacion,
- *   tipo_inmueble, estado, id_usuario, video, miniatura, fotos
+ * Recibe (desde publish.jsx): ciudad, direccion, barrio, latitud, longitud,
+ *   titulo, descripcion, precio, area_m2, habitaciones, banos,
+ *   tipo_operacion, tipo_inmueble, estado, id_usuario, video,
+ *   miniatura, fotos
  *
  * video, miniatura y fotos pueden llegar como URL completa (la que
  * devuelve /upload); aquí se les quita el host y se guarda solo la ruta.
@@ -72,6 +77,8 @@ const guardarPropiedad = (req, res) => {
     ciudad,
     direccion,
     barrio,
+    latitud,
+    longitud,
     titulo,
     descripcion,
     precio,
@@ -107,7 +114,7 @@ const guardarPropiedad = (req, res) => {
       INSERT INTO ubicacion (id_ubicacion, ciudad, barrio, direccion, latitud, longitud, geohash)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `;
-    const valoresUbicacion = [id_ubicacion, ciudad, barrio || null, direccion, null, null, null];
+    const valoresUbicacion = [id_ubicacion, ciudad, barrio || null, direccion, aNumeroONull(latitud), aNumeroONull(longitud), null];
 
     connection.query(queryUbicacion, valoresUbicacion, (errUbicacion) => {
       if (errUbicacion) {
@@ -208,11 +215,12 @@ const guardarPropiedad = (req, res) => {
  * Ruta: /propiedades/:id   (protegida con verificarToken)
  * Solo puede editarla el dueño (se compara con req.usuario.id del JWT).
  * Recibe (desde publish.jsx en modo edición): ciudad, direccion, barrio,
- *   titulo, descripcion, precio, area_m2, habitaciones, banos,
- *   tipo_operacion, tipo_inmueble, video, miniatura, fotos
+ *   latitud, longitud, titulo, descripcion, precio, area_m2, habitaciones,
+ *   banos, tipo_operacion, tipo_inmueble, video, miniatura, fotos
  *
  * - video / miniatura: si llegan, se guardan; se les quita el host.
  * - fotos: si llega un arreglo, REEMPLAZA las fotos actuales de la propiedad.
+ * - latitud / longitud: si llegan, actualizan el punto; si no, se conserva el anterior.
  */
 const actualizarPropiedad = (req, res) => {
   const { id } = req.params;
@@ -220,6 +228,8 @@ const actualizarPropiedad = (req, res) => {
     ciudad,
     direccion,
     barrio,
+    latitud,
+    longitud,
     titulo,
     descripcion,
     precio,
@@ -271,8 +281,8 @@ const actualizarPropiedad = (req, res) => {
 
         // 2. Actualizar la ubicación
         connection.query(
-          'UPDATE ubicacion SET ciudad = ?, barrio = ?, direccion = ? WHERE id_ubicacion = ?',
-          [ciudad, barrio || null, direccion, id_ubicacion],
+          'UPDATE ubicacion SET ciudad = ?, barrio = ?, direccion = ?, latitud = COALESCE(?, latitud), longitud = COALESCE(?, longitud) WHERE id_ubicacion = ?',
+          [ciudad, barrio || null, direccion, aNumeroONull(latitud), aNumeroONull(longitud), id_ubicacion],
           (errUbi) => {
             if (errUbi) return fallar('Error actualizando la ubicación', errUbi);
 
@@ -365,6 +375,7 @@ const eliminarPropiedad = (req, res) => {
  * no aparecen en el feed (el dueño las sigue viendo en su perfil).
  * Método HTTP: GET
  * Ruta: /propiedades/feed
+ * Incluye latitude / longitude (el punto exacto guardado) para el mapa.
  */
 const obtenerFeed = (req, res) => {
   const query = `
@@ -386,6 +397,8 @@ const obtenerFeed = (req, res) => {
       ub.ciudad,
       ub.barrio,
       ub.direccion,
+      ub.latitud AS latitude,
+      ub.longitud AS longitude,
       (
         SELECT m.url
         FROM media m
