@@ -35,8 +35,9 @@ router.get('/usuario/:id', obtenerPropiedadesPorUsuario);
 // Express tomaría la palabra "feed" como si fuera un id.
 router.get('/:id', obtenerPropiedadPorId);
 
-// ── POST /propiedades — Crear una propiedad nueva ──
-router.post('/', guardarPropiedad);
+// ── POST /propiedades — Crear una propiedad nueva (requiere token) ──
+// El dueño sale del token (req.usuario.id), no del cuerpo de la petición.
+router.post('/', verificarToken, guardarPropiedad);
 
 // ── POST /propiedades/:id/reproduccion — Sumar una reproducción al video ──
 router.post('/:id/reproduccion', registrarReproduccion);
@@ -44,9 +45,10 @@ router.post('/:id/reproduccion', registrarReproduccion);
 // ── PUT /propiedades/:id/estado — Cambiar el estado (solo el dueño) ──
 router.put('/:id/estado', verificarToken, cambiarEstadoPropiedad);
 
-// ── PUT /propiedades/:id — Actualizar una propiedad ──
+// ── PUT /propiedades/:id — Actualizar una propiedad (solo el dueño) ──
 router.put('/:id', verificarToken, actualizarPropiedad);
-// ── DELETE /propiedades/:id — Eliminar una propiedad ──
-router.delete('/:id', eliminarPropiedad);
+
+// ── DELETE /propiedades/:id — Eliminar una propiedad (solo el dueño) ──
+router.delete('/:id', verificarToken, eliminarPropiedad);
 
 module.exports = router;

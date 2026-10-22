@@ -27,6 +27,10 @@ router.post(
   (req, res, next) => {
     uploadPerfil.single('foto_perfil')(req, res, (err) => {
       if (err) {
+        // Imagen demasiado pesada (límite de 5 MB en upload-perfil-middleware.js)
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ mensaje: 'La imagen supera el tamaño máximo (5 MB)' });
+        }
         return res.status(400).json({ mensaje: 'Solo se permiten imágenes (JPG, PNG o WEBP)' });
       }
       next();

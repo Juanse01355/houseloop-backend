@@ -57,11 +57,14 @@ const obtenerPropiedades = (req, res) => {
  * Crea la ubicación, la propiedad y los registros de media (fotos)
  * en una sola transacción.
  * Método HTTP: POST
- * Ruta: /propiedades
+ * Ruta: /propiedades   (protegida con verificarToken)
  * Recibe (desde publish.jsx): ciudad, direccion, barrio, latitud, longitud,
  *   titulo, descripcion, precio, area_m2, habitaciones, banos,
- *   tipo_operacion, tipo_inmueble, estado, id_usuario, video,
- *   miniatura, fotos
+ *   tipo_operacion, tipo_inmueble, estado, video, miniatura, fotos
+ *
+ * El dueño (id_usuario) NO viene del cuerpo de la petición: se toma
+ * del token (req.usuario.id), para que nadie pueda publicar a nombre
+ * de otro usuario.
  *
  * video, miniatura y fotos pueden llegar como URL completa (la que
  * devuelve /upload); aquí se les quita el host y se guarda solo la ruta.
@@ -85,15 +88,17 @@ const guardarPropiedad = (req, res) => {
     tipo_operacion,
     tipo_inmueble,
     estado,
-    id_usuario,
     video,
     miniatura,
     fotos,
   } = req.body;
 
+  // El dueño es el usuario del token, ya verificado por verificarToken
+  const id_usuario = req.usuario.id;
+
   // Validación mínima de campos obligatorios
-  if (!ciudad || !direccion || !titulo || !precio || !id_usuario || !descripcion || !tipo_operacion) {
-    return res.status(400).json({ error: 'Faltan campos obligatorios (ciudad, direccion, titulo, precio, id_usuario, descripcion o tipo_operacion).' });
+  if (!ciudad || !direccion || !titulo || !precio || !descripcion || !tipo_operacion) {
+    return res.status(400).json({ error: 'Faltan campos obligatorios (ciudad, direccion, titulo, precio, descripcion o tipo_operacion).' });
   }
 
   // Se guarda solo la ruta, sin IP
@@ -347,20 +352,42 @@ const actualizarPropiedad = (req, res) => {
  * eliminarPropiedad
  * Elimina un registro de propiedad de la base de datos.
  * Método HTTP: DELETE
- * Ruta: /propiedades/:id
+ * Ruta: /propiedades/:id   (protegida con verificarToken)
+ * Solo puede eliminarla el dueño (se compara con req.usuario.id del JWT).
  */
 const eliminarPropiedad = (req, res) => {
   const { id } = req.params;
 
-  const query = `DELETE FROM propiedad WHERE id_propiedad = ?`;
+  // 1. La propiedad debe existir y ser del usuario del token
+  connection.query(
+    'SELECT id_usuario FROM propiedad WHERE id_propiedad = ?',
+    [id],
+    (errBusqueda, filas) => {
+      if (errBusqueda) {
+        res.status(500).json({ error: 'Error consultando la propiedad', detalle: errBusqueda.message });
+        return;
+      }
 
-  connection.query(query, [id], (error) => {
-    if (error) {
-      res.status(500).json({ error: 'Error eliminando propiedad', detalle: error.message });
-      return;
+      if (filas.length === 0) {
+        res.status(404).json({ error: 'Propiedad no encontrada' });
+        return;
+      }
+
+      if (String(filas[0].id_usuario) !== String(req.usuario.id)) {
+        res.status(403).json({ error: 'Solo el dueño puede eliminar esta propiedad' });
+        return;
+      }
+
+      // 2. Es el dueño: eliminamos la propiedad
+      connection.query('DELETE FROM propiedad WHERE id_propiedad = ?', [id], (error) => {
+        if (error) {
+          res.status(500).json({ error: 'Error eliminando propiedad', detalle: error.message });
+          return;
+        }
+        res.json({ mensaje: '✅ Propiedad eliminada correctamente' });
+      });
     }
-    res.json({ mensaje: '✅ Propiedad eliminada correctamente' });
-  });
+  );
 };
 
 /**

@@ -9,35 +9,63 @@ const bcrypt     = require('bcrypt');
 const jwt        = require('jsonwebtoken');
 const connection = require('../db/connection');
 
-
+// La clave secreta viene solo del entorno (.env): no hay clave de respaldo
 const { JWT_SECRET } = require('../config/jwt');
+
+// Formato básico de un correo (algo@dominio.ext)
+const CORREO_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * registrarUsuario
  * Crea un nuevo usuario en la base de datos.
  * Método HTTP: POST
  * Ruta: /auth/registro
- * Recibe: nombre, correo, contraseña — desde el cuerpo de la petición.
- * Proceso: encripta la contraseña con bcrypt antes de guardarla.
+ * Recibe: nombre, correo, contrasena — desde el cuerpo de la petición.
+ * Proceso: valida los datos y encripta la contraseña con bcrypt
+ *          antes de guardarla.
  * Respuesta: mensaje de confirmación con el ID del nuevo usuario.
  */
-const registrarUsuario = async (req, res) => {
+const registrarUsuario = (req, res) => {
   const { nombre, correo, contrasena } = req.body;
 
-  try {
-    // Verificar si el correo ya está registrado
-    connection.query(
-      'SELECT id_usuario FROM usuario WHERE correo = ?',
-      [correo],
-      async (error, results) => {
-        if (error) {
-          return res.status(500).json({ error: 'Error verificando el correo' });
-        }
+  // Los tres deben ser texto no vacío (si llega un objeto o un número, bcrypt falla)
+  const sonTexto = [nombre, correo, contrasena].every(
+    (v) => typeof v === 'string' && v.trim() !== ''
+  );
+  if (!sonTexto) {
+    return res.status(400).json({ error: 'Nombre, correo y contraseña son obligatorios' });
+  }
 
-        if (results.length > 0) {
-          return res.status(400).json({ error: 'El correo ya está registrado' });
-        }
+  // Quitar espacios sobrantes al inicio y al final
+  const nombreLimpio = nombre.trim();
+  const correoLimpio = correo.trim();
 
+  if (!CORREO_REGEX.test(correoLimpio)) {
+    return res.status(400).json({ error: 'El correo no tiene un formato válido' });
+  }
+
+  // bcrypt solo usa los primeros 72 bytes; el máximo evita gastar CPU en vano
+  if (contrasena.length < 8 || contrasena.length > 72) {
+    return res.status(400).json({ error: 'La contraseña debe tener entre 8 y 72 caracteres' });
+  }
+
+  // Verificar si el correo ya está registrado
+  connection.query(
+    'SELECT id_usuario FROM usuario WHERE correo = ?',
+    [correoLimpio],
+    async (error, results) => {
+      if (error) {
+        console.error('Error verificando el correo:', error.message);
+        return res.status(500).json({ error: 'Error verificando el correo' });
+      }
+
+      if (results.length > 0) {
+        return res.status(400).json({ error: 'El correo ya está registrado' });
+      }
+
+      // El try/catch va DENTRO del callback: es donde se ejecuta bcrypt,
+      // y un error aquí no lo atrapa un try/catch que esté afuera.
+      try {
         // Encriptar la contraseña con bcrypt (10 rondas de encriptación)
         const hash = await bcrypt.hash(contrasena, 10);
 
@@ -52,18 +80,24 @@ const registrarUsuario = async (req, res) => {
           VALUES (?, ?, ?, ?, 'EMAIL', 'ACTIVA')
         `;
 
-        connection.query(query, [id_usuario, nombre, correo, hash], (error, results) => {
-          if (error) {
-            return res.status(500).json({ error: 'Error creando el usuario', detalle: error.message });
+        connection.query(query, [id_usuario, nombreLimpio, correoLimpio, hash], (errInsert) => {
+          if (errInsert) {
+            // Dos registros casi simultáneos con el mismo correo
+            if (errInsert.code === 'ER_DUP_ENTRY') {
+              return res.status(400).json({ error: 'El correo ya está registrado' });
+            }
+            console.error('Error creando el usuario:', errInsert.message);
+            return res.status(500).json({ error: 'Error creando el usuario' });
           }
 
           res.json({ mensaje: '✅ Usuario registrado correctamente', id: id_usuario });
         });
+      } catch (err) {
+        console.error('Error en el registro:', err.message);
+        res.status(500).json({ error: 'Error en el servidor' });
       }
-    );
-  } catch (error) {
-    res.status(500).json({ error: 'Error en el servidor', detalle: error.message });
-  }
+    }
+  );
 };
 
 /**
@@ -76,25 +110,40 @@ const registrarUsuario = async (req, res) => {
  *          genera y devuelve un token JWT válido por 24 horas.
  * Respuesta: token JWT + datos básicos del usuario.
  */
-const iniciarSesion = async (req, res) => {
+const iniciarSesion = (req, res) => {
   const { correo, contrasena } = req.body;
 
-  try {
-    // Buscar el usuario por correo
-    connection.query(
-      'SELECT * FROM usuario WHERE correo = ?',
-      [correo],
-      async (error, results) => {
-        if (error) {
-          return res.status(500).json({ error: 'Error buscando el usuario' });
-        }
+  // Ambos deben ser texto no vacío
+  if (
+    typeof correo !== 'string' || typeof contrasena !== 'string' ||
+    !correo.trim() || !contrasena
+  ) {
+    return res.status(400).json({ error: 'Correo y contraseña son obligatorios' });
+  }
 
-        if (results.length === 0) {
-          return res.status(401).json({ error: 'Correo o contraseña incorrectos' });
-        }
+  // Buscar el usuario por correo
+  connection.query(
+    'SELECT * FROM usuario WHERE correo = ?',
+    [correo.trim()],
+    async (error, results) => {
+      if (error) {
+        console.error('Error buscando el usuario:', error.message);
+        return res.status(500).json({ error: 'Error buscando el usuario' });
+      }
 
-        const usuario = results[0];
+      if (results.length === 0) {
+        return res.status(401).json({ error: 'Correo o contraseña incorrectos' });
+      }
 
+      const usuario = results[0];
+
+      // Usuarios sin contraseña (por ejemplo, registrados con Google):
+      // bcrypt.compare fallaría, así que respondemos igual que con una clave mala
+      if (!usuario.contrasena_hash) {
+        return res.status(401).json({ error: 'Correo o contraseña incorrectos' });
+      }
+
+      try {
         // Verificar la contraseña con bcrypt
         const passwordOk = await bcrypt.compare(contrasena, usuario.contrasena_hash);
 
@@ -117,12 +166,14 @@ const iniciarSesion = async (req, res) => {
             nombre: usuario.nombre,
             correo: usuario.correo,
             foto:   usuario.foto_perfil_url,
-          }
+          },
         });
+      } catch (err) {
+        console.error('Error en el inicio de sesión:', err.message);
+        res.status(500).json({ error: 'Error en el servidor' });
       }
-    );
-  } catch (error) {
-    res.status(500).json({ error: 'Error en el servidor', detalle: error.message });
-  }
+    }
+  );
 };
-module.exports = { registrarUsuario, iniciarSesion,};
+
+module.exports = { registrarUsuario, iniciarSesion };

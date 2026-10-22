@@ -5,13 +5,22 @@
 //
 //   Idea: en la base de datos se guarda SOLO la ruta
 //   ("/uploads/videos/xxx.mp4"), nunca la IP. Al responder, el
-//   backend le antepone la dirección con la que lo llamó el
-//   cliente en ese momento. Así, si cambia la IP, la red o el
-//   servidor, no hay que tocar ningún dato guardado.
+//   backend le antepone la dirección del servidor. Así, si cambia
+//   la IP, la red o el servidor, no hay que tocar ningún dato guardado.
 // ============================================================
 
-// "http://192.168.1.24:3300" (o localhost)
-const hostDe = (req) => `${req.protocol}://${req.get('host')}`;
+// Dirección pública de este servidor, SIN barra final.
+//  - En producción: se usa BASE_URL (variable de entorno), por ejemplo
+//    "https://api.tudominio.com". Así las URLs siempre salen en https
+//    y no dependen de lo que mande cada petición.
+//  - En desarrollo (BASE_URL vacía o sin definir): se arma con la petición,
+//    por ejemplo "http://192.168.1.24:3300". Con "trust proxy" activado,
+//    req.protocol respeta el header x-forwarded-proto del proxy de la nube.
+const hostDe = (req) => {
+  const base = (process.env.BASE_URL || '').trim();
+  if (base) return base.replace(/\/+$/, '');
+  return `${req.protocol}://${req.get('host')}`;
+};
 
 // "http://192.168.1.16:3300/uploads/videos/a.mp4" → "/uploads/videos/a.mp4"
 // Solo toca URLs que apunten a /uploads (las de este servidor).
