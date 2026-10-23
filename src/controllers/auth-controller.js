@@ -12,8 +12,32 @@ const connection = require('../db/connection');
 // La clave secreta viene solo del entorno (.env): no hay clave de respaldo
 const { JWT_SECRET } = require('../config/jwt');
 
-// Formato básico de un correo (algo@dominio.ext)
-const CORREO_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// ── Límites y reglas (deben ser iguales a las de la pantalla de crear cuenta) ──
+const LIMITES = {
+  nombre:     { min: 2, max: 30 },
+  correo:     { max: 60 },
+  contrasena: { min: 8, max: 32 },
+};
+
+// Nombre: solo letras (con tildes, ñ y ü) y un solo espacio entre palabras
+const LETRAS = 'A-Za-zÁÉÍÓÚÜÑáéíóúüñ';
+const NOMBRE_REGEX = new RegExp(`^[${LETRAS}]+( [${LETRAS}]+)*$`);
+
+// Correo: parte antes de la @ (letras y números separados por un solo . _ + o -)
+const CORREO_LOCAL_REGEX = /^[A-Za-z0-9]+([._+-][A-Za-z0-9]+)*$/;
+// Correo: parte después de la @ (dominio con punto y terminación de solo letras)
+const CORREO_DOMINIO_REGEX = /^([A-Za-z0-9]+(-[A-Za-z0-9]+)*\.)+[A-Za-z]{2,}$/;
+
+// Contraseña: solo caracteres visibles del teclado (sin espacios ni tildes)
+const CONTRASENA_CARACTERES_REGEX = /^[\x21-\x7E]+$/;
+
+// Devuelve true si el correo tiene un formato válido
+const correoValido = (correo) => {
+  const partes = correo.split('@');
+  if (partes.length !== 2) return false;
+  const [local, dominio] = partes;
+  return CORREO_LOCAL_REGEX.test(local) && CORREO_DOMINIO_REGEX.test(dominio);
+};
 
 /**
  * registrarUsuario
@@ -36,17 +60,43 @@ const registrarUsuario = (req, res) => {
     return res.status(400).json({ error: 'Nombre, correo y contraseña son obligatorios' });
   }
 
-  // Quitar espacios sobrantes al inicio y al final
+  // Quitar espacios sobrantes al inicio y al final; el correo se guarda en minúsculas
   const nombreLimpio = nombre.trim();
-  const correoLimpio = correo.trim();
+  const correoLimpio = correo.trim().toLowerCase();
 
-  if (!CORREO_REGEX.test(correoLimpio)) {
+  // ── Nombre ──
+  if (nombreLimpio.length < LIMITES.nombre.min || nombreLimpio.length > LIMITES.nombre.max) {
+    return res.status(400).json({
+      error: `El nombre debe tener entre ${LIMITES.nombre.min} y ${LIMITES.nombre.max} caracteres`,
+    });
+  }
+  if (!NOMBRE_REGEX.test(nombreLimpio)) {
+    return res.status(400).json({
+      error: 'El nombre solo puede tener letras y un espacio entre palabras',
+    });
+  }
+
+  // ── Correo ──
+  if (correoLimpio.length > LIMITES.correo.max || !correoValido(correoLimpio)) {
     return res.status(400).json({ error: 'El correo no tiene un formato válido' });
   }
 
-  // bcrypt solo usa los primeros 72 bytes; el máximo evita gastar CPU en vano
-  if (contrasena.length < 8 || contrasena.length > 72) {
-    return res.status(400).json({ error: 'La contraseña debe tener entre 8 y 72 caracteres' });
+  // ── Contraseña ──
+  // (bcrypt solo usa los primeros 72 bytes; el máximo evita gastar CPU en vano)
+  if (contrasena.length < LIMITES.contrasena.min || contrasena.length > LIMITES.contrasena.max) {
+    return res.status(400).json({
+      error: `La contraseña debe tener entre ${LIMITES.contrasena.min} y ${LIMITES.contrasena.max} caracteres`,
+    });
+  }
+  if (!CONTRASENA_CARACTERES_REGEX.test(contrasena)) {
+    return res.status(400).json({
+      error: 'La contraseña solo puede tener letras, números y símbolos del teclado, sin espacios',
+    });
+  }
+  if (!/[A-Z]/.test(contrasena) || !/[a-z]/.test(contrasena) || !/[0-9]/.test(contrasena)) {
+    return res.status(400).json({
+      error: 'La contraseña debe tener al menos una mayúscula, una minúscula y un número',
+    });
   }
 
   // Verificar si el correo ya está registrado
@@ -119,6 +169,12 @@ const iniciarSesion = (req, res) => {
     !correo.trim() || !contrasena
   ) {
     return res.status(400).json({ error: 'Correo y contraseña son obligatorios' });
+  }
+
+  // Tope de largo: ningún usuario real tiene datos más largos que esto
+  // (no se aplican las reglas nuevas aquí para no dejar fuera a usuarios ya registrados)
+  if (correo.length > 250 || contrasena.length > 72) {
+    return res.status(401).json({ error: 'Correo o contraseña incorrectos' });
   }
 
   // Buscar el usuario por correo

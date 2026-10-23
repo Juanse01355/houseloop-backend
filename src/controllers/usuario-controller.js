@@ -6,6 +6,29 @@
 const db = require('../db/connection');
 const { hostDe, urlPublica } = require('../utils/urls');
 
+// ── Límites y reglas (deben ser iguales a las de signup y editar perfil en la app) ──
+const LIMITES = {
+  nombre: { min: 2, max: 30 },
+  correo: { max: 60 },
+};
+
+// Nombre: solo letras (con tildes, ñ y ü) y un solo espacio entre palabras
+const LETRAS = 'A-Za-zÁÉÍÓÚÜÑáéíóúüñ';
+const NOMBRE_REGEX = new RegExp(`^[${LETRAS}]+( [${LETRAS}]+)*$`);
+
+// Correo: parte antes de la @ (letras y números separados por un solo . _ + o -)
+const CORREO_LOCAL_REGEX = /^[A-Za-z0-9]+([._+-][A-Za-z0-9]+)*$/;
+// Correo: parte después de la @ (dominio con punto y terminación de solo letras)
+const CORREO_DOMINIO_REGEX = /^([A-Za-z0-9]+(-[A-Za-z0-9]+)*\.)+[A-Za-z]{2,}$/;
+
+// Devuelve true si el correo tiene un formato válido
+const correoValido = (correo) => {
+  const partes = correo.split('@');
+  if (partes.length !== 2) return false;
+  const [local, dominio] = partes;
+  return CORREO_LOCAL_REGEX.test(local) && CORREO_DOMINIO_REGEX.test(dominio);
+};
+
 // Función para GET /api/perfil
 // req.usuario.id viene del middleware (auth-middleware.js),
 // que ya verificó el token antes de llegar hasta acá
@@ -49,21 +72,39 @@ const actualizarPerfil = (req, res) => {
   const idUsuario = req.usuario.id;
   const { nombre, correo } = req.body;
 
-  // Validación básica: ambos campos son obligatorios
-  if (!nombre || !correo) {
+  // Ambos deben ser texto no vacío (si llega un objeto o un número, se rechaza)
+  if (
+    typeof nombre !== 'string' || typeof correo !== 'string' ||
+    !nombre.trim() || !correo.trim()
+  ) {
     return res.status(400).json({ mensaje: 'Nombre y correo son obligatorios' });
   }
 
-  // Validación de formato del correo
-  const correoRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!correoRegex.test(correo)) {
+  // Quitar espacios sobrantes al inicio y al final; el correo se guarda en minúsculas
+  const nombreLimpio = nombre.trim();
+  const correoLimpio = correo.trim().toLowerCase();
+
+  // ── Nombre ──
+  if (nombreLimpio.length < LIMITES.nombre.min || nombreLimpio.length > LIMITES.nombre.max) {
+    return res.status(400).json({
+      mensaje: `El nombre debe tener entre ${LIMITES.nombre.min} y ${LIMITES.nombre.max} caracteres`,
+    });
+  }
+  if (!NOMBRE_REGEX.test(nombreLimpio)) {
+    return res.status(400).json({
+      mensaje: 'El nombre solo puede tener letras y un espacio entre palabras',
+    });
+  }
+
+  // ── Correo ──
+  if (correoLimpio.length > LIMITES.correo.max || !correoValido(correoLimpio)) {
     return res.status(400).json({ mensaje: 'El correo no tiene un formato válido' });
   }
 
   db.query(
     `UPDATE usuario SET nombre = ?, correo = ?, fecha_actualizacion = NOW()
      WHERE id_usuario = ?`,
-    [nombre, correo, idUsuario],
+    [nombreLimpio, correoLimpio, idUsuario],
     (error, results) => {
       if (error) {
         console.error(error);
@@ -76,7 +117,11 @@ const actualizarPerfil = (req, res) => {
         return res.status(500).json({ mensaje: 'Error al actualizar el perfil' });
       }
 
-      res.status(200).json({ mensaje: 'Perfil actualizado correctamente', nombre, correo });
+      res.status(200).json({
+        mensaje: 'Perfil actualizado correctamente',
+        nombre: nombreLimpio,
+        correo: correoLimpio,
+      });
     }
   );
 };
