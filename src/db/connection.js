@@ -9,7 +9,9 @@ const pool = mysql.createPool({
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME     || 'houseloop',
   waitForConnections: true,
-  connectionLimit: 10,
+  // Máximo de conexiones abiertas a la vez. El plan gratis de Aiven limita las
+  // conexiones, así que se usa un número pequeño (5 alcanza para poco tráfico).
+  connectionLimit: 5,
   queueLimit: 0,
   enableKeepAlive: true,
   keepAliveInitialDelay: 0,

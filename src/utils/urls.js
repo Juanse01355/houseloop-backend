@@ -22,9 +22,8 @@ const hostDe = (req) => {
   return `${req.protocol}://${req.get('host')}`;
 };
 
-// "http://192.168.1.16:3300/uploads/videos/a.mp4" → "/uploads/videos/a.mp4"
 // Solo toca URLs que apunten a /uploads (las de este servidor).
-// Cualquier otra (por ejemplo la foto de Google) se deja igual.
+// Cualquier otra (por ejemplo, un enlace a un servicio externo) se deja igual.
 const rutaRelativa = (valor) => {
   if (!valor || typeof valor !== 'string') return valor;
   const coincidencia = valor.match(/^https?:\/\/[^/]+(\/uploads\/.*)$/);
