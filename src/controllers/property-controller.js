@@ -13,6 +13,10 @@
 //   - Consultas simples: connection.query(...) funciona igual.
 //   - Transacciones: se pide una conexión con connection.getConnection,
 //     se usa para todos los pasos y SIEMPRE se devuelve con release().
+//
+//   VALIDACIÓN: validarPropiedad() repite en el servidor las mismas
+//   reglas de publish.jsx. La app se puede saltar con Postman; el
+//   servidor es la protección real.
 // ============================================================
 
 const connection = require('../db/connection');
@@ -21,6 +25,8 @@ const { rutaRelativa, urlPublica } = require('../utils/urls');
 
 // Campos que contienen URLs de archivos subidos por este servidor
 const CAMPOS_URL = ['video', 'miniatura', 'foto_perfil_url', 'media_url'];
+
+const ESTADOS_VALIDOS = ['disponible', 'en_negociacion', 'no_disponible'];
 
 // Devuelve una copia de la fila con esos campos completados
 // (funciona también con datos viejos que aún tienen la IP guardada)
@@ -35,6 +41,188 @@ const conUrls = (req, fila) => {
 // Convierte un valor (latitud / longitud) a número, o null si no es válido
 const aNumeroONull = (v) =>
   v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v);
+
+// ------------------------------------------------------------
+//   VALIDACIÓN DE PROPIEDADES (mismas reglas que publish.jsx)
+// ------------------------------------------------------------
+const RE_DIRECCION = /^[\p{L}\p{N} #.,-]+$/u; // letras, números, espacio y # . , -
+const RE_BARRIO = /^[\p{L}\p{N} .-]+$/u; // letras, números, espacio, . y -
+const RE_DESCRIPCION_PROHIBIDA = /[<>{}[\]\\|^~`]/; // < > { } [ ] \ | ^ ~ `
+
+const esTexto = (v) => typeof v === 'string';
+const estaVacio = (v) => v === undefined || v === null || v === '';
+// Acepta texto o número y lo devuelve como texto sin espacios; otro tipo (objeto, arreglo) → null
+const comoTexto = (v) =>
+  typeof v === 'string' || typeof v === 'number' ? String(v).trim() : null;
+
+const MAX_FOTOS = 20; // provisional: súbelo si la app permite más
+
+/**
+ * Revisa el cuerpo de la petición de crear/editar una propiedad.
+ * Devuelve { error: 'mensaje' } si algo no cumple, o { datos } con los
+ * valores ya limpios (sin espacios sobrantes y con el tipo correcto).
+ */
+const validarPropiedad = (body) => {
+  const {
+    ciudad, direccion, barrio, latitud, longitud, titulo, descripcion,
+    precio, area_m2, habitaciones, banos, tipo_operacion, tipo_inmueble,
+    estado, video, miniatura, fotos,
+  } = body || {};
+
+  // --- Textos obligatorios: deben ser texto (no objetos) ---
+  if (!esTexto(titulo) || !esTexto(ciudad) || !esTexto(direccion) || !esTexto(descripcion) || !esTexto(tipo_operacion)) {
+    return { error: 'Faltan campos obligatorios (ciudad, direccion, titulo, precio, descripcion o tipo_operacion).' };
+  }
+  const tituloL = titulo.trim();
+  const ciudadL = ciudad.trim();
+  const direccionL = direccion.trim();
+  const descripcionL = descripcion.trim();
+  const operacionL = tipo_operacion.trim();
+
+  if (!tituloL || !ciudadL || !direccionL || !descripcionL || !operacionL || estaVacio(precio)) {
+    return { error: 'Faltan campos obligatorios (ciudad, direccion, titulo, precio, descripcion o tipo_operacion).' };
+  }
+
+  if (tituloL.length > 250) return { error: 'El título es demasiado largo (máximo 250 caracteres).' };
+  if (ciudadL.length > 250) return { error: 'La ciudad es demasiado larga (máximo 250 caracteres).' };
+  if (operacionL.length > 250) return { error: 'El tipo de operación no es válido.' };
+
+  // --- Dirección: 5 a 60 ---
+  if (direccionL.length < 5 || direccionL.length > 60) {
+    return { error: 'La dirección debe tener entre 5 y 60 caracteres.' };
+  }
+  if (!RE_DIRECCION.test(direccionL)) {
+    return { error: 'La dirección solo puede tener letras, números, espacios y los símbolos # . , -' };
+  }
+
+  // --- Barrio (opcional): 3 a 40 ---
+  let barrioL = null;
+  if (!estaVacio(barrio)) {
+    if (!esTexto(barrio)) return { error: 'El barrio no es válido.' };
+    barrioL = barrio.trim();
+    if (barrioL.length < 3 || barrioL.length > 40) {
+      return { error: 'El barrio debe tener entre 3 y 40 caracteres.' };
+    }
+    if (!RE_BARRIO.test(barrioL)) {
+      return { error: 'El barrio solo puede tener letras, números, espacios, punto y guion.' };
+    }
+  }
+
+  // --- Descripción: hasta 720, sin símbolos peligrosos ---
+  if (descripcionL.length > 720) {
+    return { error: 'La descripción puede tener máximo 720 caracteres.' };
+  }
+  if (RE_DESCRIPCION_PROHIBIDA.test(descripcionL)) {
+    return { error: 'La descripción tiene símbolos no permitidos.' };
+  }
+
+  // --- Precio: solo dígitos, mayor que 0, hasta 12 dígitos ---
+  const precioT = comoTexto(precio);
+  if (precioT === null || !/^\d{1,12}$/.test(precioT) || Number(precioT) <= 0) {
+    return { error: 'El precio debe ser un número entero mayor que 0, de hasta 12 dígitos.' };
+  }
+
+  // --- Área (opcional): hasta 7 dígitos y 2 decimales, mayor que 0 ---
+  let areaT = null;
+  if (!estaVacio(area_m2)) {
+    areaT = comoTexto(area_m2);
+    if (areaT === null || !/^\d{1,7}(\.\d{1,2})?$/.test(areaT) || Number(areaT) <= 0) {
+      return { error: 'El área debe ser mayor que 0, con hasta 7 dígitos y 2 decimales.' };
+    }
+  }
+
+  // --- Habitaciones y baños: enteros de 0 a 20 (si no llegan, 0) ---
+  const aEntero0a20 = (valor) => {
+    if (estaVacio(valor)) return 0;
+    const t = comoTexto(valor);
+    if (t === null || !/^\d{1,2}$/.test(t)) return null;
+    const n = Number(t);
+    return n >= 0 && n <= 20 ? n : null;
+  };
+  const habitacionesN = aEntero0a20(habitaciones);
+  if (habitacionesN === null) return { error: 'Las habitaciones deben ser un número entero de 0 a 20.' };
+  const banosN = aEntero0a20(banos);
+  if (banosN === null) return { error: 'Los baños deben ser un número entero de 0 a 20.' };
+
+  // --- tipo_inmueble (opcional) ---
+  let inmuebleL = null;
+  if (!estaVacio(tipo_inmueble)) {
+    if (!esTexto(tipo_inmueble) || tipo_inmueble.trim().length > 250) {
+      return { error: 'El tipo de inmueble no es válido.' };
+    }
+    inmuebleL = tipo_inmueble.trim();
+  }
+
+  // --- Estado (opcional al crear): solo los tres válidos ---
+  let estadoL = 'disponible';
+  if (!estaVacio(estado)) {
+    if (!ESTADOS_VALIDOS.includes(estado)) {
+      return { error: `Estado inválido. Debe ser uno de: ${ESTADOS_VALIDOS.join(', ')}` };
+    }
+    estadoL = estado;
+  }
+
+  // --- Latitud / longitud (opcionales) ---
+  let lat = null;
+  if (!estaVacio(latitud)) {
+    lat = aNumeroONull(latitud);
+    if (lat === null || lat < -90 || lat > 90) return { error: 'La latitud no es válida.' };
+  }
+  let lng = null;
+  if (!estaVacio(longitud)) {
+    lng = aNumeroONull(longitud);
+    if (lng === null || lng < -180 || lng > 180) return { error: 'La longitud no es válida.' };
+  }
+
+  // --- Video y miniatura (opcionales): texto; se guarda solo la ruta ---
+  let videoRuta = null;
+  if (!estaVacio(video)) {
+    if (!esTexto(video)) return { error: 'El video no es válido.' };
+    videoRuta = rutaRelativa(video) || null;
+    if (videoRuta && videoRuta.length > 500) return { error: 'La dirección del video es demasiado larga.' };
+  }
+  let miniaturaRuta = null;
+  if (!estaVacio(miniatura)) {
+    if (!esTexto(miniatura)) return { error: 'La miniatura no es válida.' };
+    miniaturaRuta = rutaRelativa(miniatura) || null;
+    if (miniaturaRuta && miniaturaRuta.length > 500) return { error: 'La dirección de la miniatura es demasiado larga.' };
+  }
+
+  // --- Fotos (opcional): arreglo de textos. undefined = "no tocar" al editar ---
+  let fotosRutas = null;
+  if (fotos !== undefined && fotos !== null) {
+    if (!Array.isArray(fotos)) return { error: 'Las fotos deben enviarse como una lista.' };
+    if (fotos.length > MAX_FOTOS) return { error: `Máximo ${MAX_FOTOS} fotos por propiedad.` };
+    fotosRutas = [];
+    for (const url of fotos) {
+      const ruta = esTexto(url) ? rutaRelativa(url) : null;
+      if (!ruta || ruta.length > 250) return { error: 'Una de las fotos no es válida.' };
+      fotosRutas.push(ruta);
+    }
+  }
+
+  return {
+    datos: {
+      ciudad: ciudadL,
+      direccion: direccionL,
+      barrio: barrioL,
+      latitud: lat,
+      longitud: lng,
+      titulo: tituloL,
+      descripcion: descripcionL,
+      precio: precioT,
+      area_m2: areaT,
+      habitaciones: habitacionesN,
+      banos: banosN,
+      tipo_operacion: operacionL,
+      tipo_inmueble: inmuebleL,
+      estado: estadoL,
+      video: videoRuta,
+      miniatura: miniaturaRuta,
+      fotos: fotosRutas, // null = no se envió
+    },
+  };
+};
 
 /**
  * obtenerPropiedades
@@ -73,37 +261,14 @@ const obtenerPropiedades = (req, res) => {
  * así que se generan aquí con uuid antes de insertar.
  */
 const guardarPropiedad = (req, res) => {
-  const {
-    ciudad,
-    direccion,
-    barrio,
-    latitud,
-    longitud,
-    titulo,
-    descripcion,
-    precio,
-    area_m2,
-    habitaciones,
-    banos,
-    tipo_operacion,
-    tipo_inmueble,
-    estado,
-    video,
-    miniatura,
-    fotos,
-  } = req.body;
+  // Se revisan todos los datos ANTES de tocar la base
+  const { error: errorValidacion, datos } = validarPropiedad(req.body);
+  if (errorValidacion) {
+    return res.status(400).json({ error: errorValidacion });
+  }
 
   // El dueño es el usuario del token, ya verificado por verificarToken
   const id_usuario = req.usuario.id;
-
-  // Validación mínima de campos obligatorios
-  if (!ciudad || !direccion || !titulo || !precio || !descripcion || !tipo_operacion) {
-    return res.status(400).json({ error: 'Faltan campos obligatorios (ciudad, direccion, titulo, precio, descripcion o tipo_operacion).' });
-  }
-
-  // Se guarda solo la ruta, sin IP
-  const videoRuta = rutaRelativa(video) || null;
-  const miniaturaRuta = rutaRelativa(miniatura) || null;
 
   const id_ubicacion = uuidv4();
   const id_propiedad = uuidv4();
@@ -140,7 +305,7 @@ const guardarPropiedad = (req, res) => {
         INSERT INTO ubicacion (id_ubicacion, ciudad, barrio, direccion, latitud, longitud, geohash)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `;
-      const valoresUbicacion = [id_ubicacion, ciudad, barrio || null, direccion, aNumeroONull(latitud), aNumeroONull(longitud), null];
+      const valoresUbicacion = [id_ubicacion, datos.ciudad, datos.barrio, datos.direccion, datos.latitud, datos.longitud, null];
 
       conn.query(queryUbicacion, valoresUbicacion, (errUbicacion) => {
         if (errUbicacion) return fallar('Error guardando la ubicación', errUbicacion);
@@ -156,19 +321,19 @@ const guardarPropiedad = (req, res) => {
         `;
         const valoresPropiedad = [
           id_propiedad,
-          titulo,
-          descripcion,
-          precio,
-          area_m2 || null,
-          habitaciones || 0,
-          banos || 0,
-          tipo_operacion,
-          tipo_inmueble,
-          estado || 'disponible',
+          datos.titulo,
+          datos.descripcion,
+          datos.precio,
+          datos.area_m2,
+          datos.habitaciones,
+          datos.banos,
+          datos.tipo_operacion,
+          datos.tipo_inmueble,
+          datos.estado,
           id_usuario,
           id_ubicacion,
-          videoRuta,
-          miniaturaRuta,
+          datos.video,
+          datos.miniatura,
         ];
 
         conn.query(queryPropiedad, valoresPropiedad, (errPropiedad) => {
@@ -176,12 +341,7 @@ const guardarPropiedad = (req, res) => {
 
           // 3. Insertar las fotos como filas en la tabla media
           //    (el video ya quedó guardado directo en propiedad.video)
-          const archivosMedia = [];
-          if (Array.isArray(fotos)) {
-            fotos.forEach((url) =>
-              archivosMedia.push([uuidv4(), id_propiedad, rutaRelativa(url), 'foto'])
-            );
-          }
+          const archivosMedia = (datos.fotos || []).map((ruta) => [uuidv4(), id_propiedad, ruta, 'foto']);
 
           if (archivosMedia.length === 0) {
             return terminar('✅ Propiedad guardada correctamente (sin fotos)');
@@ -212,31 +372,12 @@ const guardarPropiedad = (req, res) => {
  */
 const actualizarPropiedad = (req, res) => {
   const { id } = req.params;
-  const {
-    ciudad,
-    direccion,
-    barrio,
-    latitud,
-    longitud,
-    titulo,
-    descripcion,
-    precio,
-    area_m2,
-    habitaciones,
-    banos,
-    tipo_operacion,
-    tipo_inmueble,
-    video,
-    miniatura,
-    fotos,
-  } = req.body;
 
-  if (!ciudad || !direccion || !titulo || !precio || !descripcion || !tipo_operacion) {
-    return res.status(400).json({ error: 'Faltan campos obligatorios.' });
+  // Se revisan todos los datos ANTES de tocar la base
+  const { error: errorValidacion, datos } = validarPropiedad(req.body);
+  if (errorValidacion) {
+    return res.status(400).json({ error: errorValidacion });
   }
-
-  const videoRuta = rutaRelativa(video) || null;
-  const miniaturaRuta = rutaRelativa(miniatura) || null;
 
   // 1. La propiedad debe existir y ser del usuario del token
   connection.query(
@@ -255,7 +396,7 @@ const actualizarPropiedad = (req, res) => {
 
       const { id_ubicacion } = filas[0];
       // Si no llegó miniatura nueva, se conserva la que ya tenía
-      const miniaturaFinal = miniaturaRuta || filas[0].miniatura;
+      const miniaturaFinal = datos.miniatura || filas[0].miniatura;
 
       // Pedimos UNA conexión del pool para toda la transacción
       connection.getConnection((errConn, conn) => {
@@ -287,7 +428,7 @@ const actualizarPropiedad = (req, res) => {
           // 2. Actualizar la ubicación
           conn.query(
             'UPDATE ubicacion SET ciudad = ?, barrio = ?, direccion = ?, latitud = COALESCE(?, latitud), longitud = COALESCE(?, longitud) WHERE id_ubicacion = ?',
-            [ciudad, barrio || null, direccion, aNumeroONull(latitud), aNumeroONull(longitud), id_ubicacion],
+            [datos.ciudad, datos.barrio, datos.direccion, datos.latitud, datos.longitud, id_ubicacion],
             (errUbi) => {
               if (errUbi) return fallar('Error actualizando la ubicación', errUbi);
 
@@ -300,15 +441,15 @@ const actualizarPropiedad = (req, res) => {
                 WHERE id_propiedad = ?
               `;
               const valores = [
-                titulo,
-                descripcion,
-                precio,
-                area_m2 || null,
-                habitaciones || 0,
-                banos || 0,
-                tipo_operacion,
-                tipo_inmueble,
-                videoRuta,
+                datos.titulo,
+                datos.descripcion,
+                datos.precio,
+                datos.area_m2,
+                datos.habitaciones,
+                datos.banos,
+                datos.tipo_operacion,
+                datos.tipo_inmueble,
+                datos.video,
                 miniaturaFinal,
                 id,
               ];
@@ -317,7 +458,7 @@ const actualizarPropiedad = (req, res) => {
                 if (errProp) return fallar('Error actualizando la propiedad', errProp);
 
                 // Si no llegó el arreglo de fotos, no se tocan las existentes
-                if (!Array.isArray(fotos)) return terminar();
+                if (datos.fotos === null) return terminar();
 
                 // 4. Reemplazar las fotos: borrar las actuales e insertar las nuevas
                 conn.query(
@@ -326,9 +467,9 @@ const actualizarPropiedad = (req, res) => {
                   (errDel) => {
                     if (errDel) return fallar('Error actualizando las fotos', errDel);
 
-                    if (fotos.length === 0) return terminar();
+                    if (datos.fotos.length === 0) return terminar();
 
-                    const filasMedia = fotos.map((url) => [uuidv4(), id, rutaRelativa(url), 'foto']);
+                    const filasMedia = datos.fotos.map((ruta) => [uuidv4(), id, ruta, 'foto']);
                     conn.query(
                       'INSERT INTO media (id_media, id_propiedad, url, tipo_media) VALUES ?',
                       [filasMedia],
@@ -354,13 +495,16 @@ const actualizarPropiedad = (req, res) => {
  * Método HTTP: DELETE
  * Ruta: /propiedades/:id   (protegida con verificarToken)
  * Solo puede eliminarla el dueño (se compara con req.usuario.id del JWT).
+ *
+ * Después de borrarla, se borra su ubicación si ninguna otra propiedad
+ * la usa (antes lo hacía un trigger de la base; ahora se hace aquí).
  */
 const eliminarPropiedad = (req, res) => {
   const { id } = req.params;
 
   // 1. La propiedad debe existir y ser del usuario del token
   connection.query(
-    'SELECT id_usuario FROM propiedad WHERE id_propiedad = ?',
+    'SELECT id_usuario, id_ubicacion FROM propiedad WHERE id_propiedad = ?',
     [id],
     (errBusqueda, filas) => {
       if (errBusqueda) {
@@ -378,13 +522,25 @@ const eliminarPropiedad = (req, res) => {
         return;
       }
 
+      const { id_ubicacion } = filas[0];
+
       // 2. Es el dueño: eliminamos la propiedad
       connection.query('DELETE FROM propiedad WHERE id_propiedad = ?', [id], (error) => {
         if (error) {
           res.status(500).json({ error: 'Error eliminando propiedad', detalle: error.message });
           return;
         }
-        res.json({ mensaje: '✅ Propiedad eliminada correctamente' });
+
+        // 3. Limpieza: borrar la ubicación si ya nadie la usa.
+        //    Si esta limpieza falla, la propiedad ya está borrada: se responde OK igual.
+        connection.query(
+          'DELETE FROM ubicacion WHERE id_ubicacion = ? AND NOT EXISTS (SELECT 1 FROM propiedad WHERE id_ubicacion = ?)',
+          [id_ubicacion, id_ubicacion],
+          (errUbi) => {
+            if (errUbi) console.error('No se pudo limpiar la ubicación:', errUbi.message);
+            res.json({ mensaje: '✅ Propiedad eliminada correctamente' });
+          }
+        );
       });
     }
   );
@@ -588,8 +744,6 @@ const obtenerPropiedadPorId = (req, res) => {
  * Método HTTP: PUT
  * Ruta: /propiedades/:id/estado   (protegida con verificarToken)
  */
-const ESTADOS_VALIDOS = ['disponible', 'en_negociacion', 'no_disponible'];
-
 const cambiarEstadoPropiedad = (req, res) => {
   const { id } = req.params;
   const { estado } = req.body;

@@ -193,8 +193,8 @@ const iniciarSesion = (req, res) => {
 
       const usuario = results[0];
 
-      // Usuarios sin contraseña (por ejemplo, registrados con Google):
-      // bcrypt.compare fallaría, así que respondemos igual que con una clave mala
+      // Usuarios sin contraseña guardada: bcrypt.compare fallaría,
+      // así que respondemos igual que con una clave mala
       if (!usuario.contrasena_hash) {
         return res.status(401).json({ error: 'Correo o contraseña incorrectos' });
       }
