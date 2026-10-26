@@ -1,17 +1,13 @@
 // ============================================================
 //   HOUSELOOP BACKEND — Middleware de subida de foto de perfil
 //   Guarda este archivo en: src/middleware/upload-perfil-middleware.js
+//
+//   La foto se deja un momento en la carpeta TEMPORAL del sistema;
+//   el controlador la sube a Cloudinary y luego la borra.
 // ============================================================
 
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-
-const carpetaPerfiles = path.join(__dirname, '..', '..', 'uploads', 'perfiles');
-
-if (!fs.existsSync(carpetaPerfiles)) {
-  fs.mkdirSync(carpetaPerfiles, { recursive: true });
-}
+const os = require('os');
 
 // La extensión la decidimos nosotros según el tipo de imagen,
 // no la que traiga el nombre original del archivo.
@@ -22,8 +18,9 @@ const EXTENSION_POR_TIPO = {
 };
 
 const storage = multer.diskStorage({
+  // Carpeta temporal del sistema (en Render es /tmp, en Windows AppData\Local\Temp)
   destination: (req, file, cb) => {
-    cb(null, carpetaPerfiles);
+    cb(null, os.tmpdir());
   },
   filename: (req, file, cb) => {
     // Usamos el id del usuario logueado (req.usuario.id, ya

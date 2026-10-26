@@ -3,8 +3,10 @@
 // no async/await — por eso la consulta recibe una función
 // como último argumento, que se ejecuta cuando MySQL responde.
 
+const fs = require('fs');
 const db = require('../db/connection');
-const { hostDe, urlPublica } = require('../utils/urls');
+const cloudinary = require('../config/cloudinary');
+const { urlPublica } = require('../utils/urls');
 
 // ── Límites y reglas (deben ser iguales a las de signup y editar perfil en la app) ──
 const LIMITES = {
@@ -55,8 +57,9 @@ const obtenerPerfil = (req, res) => {
         return res.status(404).json({ mensaje: 'Usuario no encontrado' });
       }
 
-      // La foto se guarda como ruta ("/uploads/perfiles/xxx.jpg");
-      // aquí se completa con la dirección actual del servidor.
+      // Las fotos nuevas ya son URLs completas de Cloudinary y pasan
+      // sin cambios. Las viejas ("/uploads/perfiles/xxx.jpg") se
+      // completan con la dirección actual del servidor.
       const perfil = {
         ...results[0],
         foto_perfil_url: urlPublica(req, results[0].foto_perfil_url),
@@ -126,24 +129,46 @@ const actualizarPerfil = (req, res) => {
   );
 };
 
-// Función para POST /api/perfil/foto
-// Multer (upload-perfil-middleware.js) ya guardó el archivo en
-// disco antes de que esta función se ejecute. Aquí guardamos en la
-// base de datos SOLO la ruta (sin IP) y respondemos con la URL
-// completa para que el frontend la muestre de inmediato.
-const subirFotoPerfil = (req, res) => {
+// Función para POST /api/perfil/foto_perfil
+// Multer (upload-perfil-middleware.js) dejó la imagen en la carpeta
+// temporal antes de que esta función se ejecute. Aquí:
+//   1. se sube a Cloudinary (una sola foto por usuario: si ya había
+//      una, se reemplaza),
+//   2. se borra el archivo temporal,
+//   3. se guarda en la base de datos la URL https que devuelve
+//      Cloudinary y se responde con esa misma URL.
+const subirFotoPerfil = async (req, res) => {
   const idUsuario = req.usuario.id;
 
   if (!req.file) {
     return res.status(400).json({ mensaje: 'No se recibió ninguna imagen' });
   }
 
-  const rutaFoto = `/uploads/perfiles/${req.file.filename}`;
+  let resultado;
+  try {
+    resultado = await cloudinary.uploader.upload(req.file.path, {
+      folder: 'houseloop/perfiles',
+      public_id: idUsuario,   // el nombre del archivo en Cloudinary = el id del usuario
+      overwrite: true,        // si ya tenía foto, la reemplaza
+      invalidate: true,       // pide a Cloudinary olvidar la copia vieja
+      resource_type: 'image',
+      // Reduce la imagen a un máximo de 512 px por lado antes de guardarla
+      transformation: [{ width: 512, height: 512, crop: 'limit' }],
+    });
+  } catch (error) {
+    console.error('Error subiendo la foto de perfil a Cloudinary:', error.message);
+    return res.status(502).json({ mensaje: 'No se pudo subir la imagen. Intenta de nuevo.' });
+  } finally {
+    // Se borra el archivo temporal, haya salido bien o mal la subida
+    fs.unlink(req.file.path, () => {});
+  }
+
+  const urlFoto = resultado.secure_url;
 
   db.query(
     `UPDATE usuario SET foto_perfil_url = ?, fecha_actualizacion = NOW()
      WHERE id_usuario = ?`,
-    [rutaFoto, idUsuario],
+    [urlFoto, idUsuario],
     (error, results) => {
       if (error) {
         console.error(error);
@@ -152,7 +177,7 @@ const subirFotoPerfil = (req, res) => {
 
       res.status(200).json({
         mensaje: 'Foto de perfil actualizada',
-        foto_perfil_url: `${hostDe(req)}${rutaFoto}`,
+        foto_perfil_url: urlFoto,
       });
     }
   );
